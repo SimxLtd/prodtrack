@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 const SUPABASE_URL = "https://mdbziytahdeuegxlqggd.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1kYnppeXRhaGRldWVneGxxZ2dkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5OTI1MTIsImV4cCI6MjA5NTU2ODUxMn0.iPE2dckL4uVw-YewKxjd2IAq0Hii2-0QxDVQo52wH74";
 
+// ── Single request (writes, searches, small tables) ──────────
 const sb = async (path, opts = {}) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
     headers: {
@@ -23,28 +24,55 @@ const sb = async (path, opts = {}) => {
   return text ? JSON.parse(text) : [];
 };
 
+// ── Paginated fetch — loads ALL rows regardless of count ──────
+const PAGE_SIZE = 1000;
+const sbAll = async (table, query = "") => {
+  let all = [];
+  let from = 0;
+  while (true) {
+    const sep = query ? "&" : "?";
+    const path = `${table}${query ? "?" + query : ""}${sep}limit=${PAGE_SIZE}&offset=${from}`;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      headers: {
+        apikey: SUPABASE_KEY,
+        Authorization: `Bearer ${SUPABASE_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "return=representation",
+        "Range-Unit": "items",
+      },
+    });
+    if (!res.ok) { const err = await res.text(); throw new Error(err); }
+    const text = await res.text();
+    const page = text ? JSON.parse(text) : [];
+    all = all.concat(page);
+    if (page.length < PAGE_SIZE) break; // last page
+    from += PAGE_SIZE;
+  }
+  return all;
+};
+
 const db = {
   // users
-  getUsers:    ()         => sb("pt_users?order=full_name.asc"),
-  addUser:     (u)        => sb("pt_users", { method:"POST", body: JSON.stringify(u) }),
-  updateUser:  (id, u)    => sb(`pt_users?id=eq.${id}`, { method:"PATCH", body: JSON.stringify(u) }),
-  deleteUser:  (id)       => sb(`pt_users?id=eq.${id}`, { method:"DELETE", prefer:"" }),
-  loginUser:   (u, p)     => sb(`pt_users?username=eq.${u}&password=eq.${p}&active=eq.true`),
-  // master data
-  getItems:    ()         => sb("pt_items?active=eq.true&order=id.asc"),
-  addItem:     (i)        => sb("pt_items", { method:"POST", body: JSON.stringify(i) }),
-  deleteItem:  (id)       => sb(`pt_items?id=eq.${id}`, { method:"PATCH", body: JSON.stringify({ active:false }) }),
-  getEmployees:()         => sb("pt_employees?active=eq.true&order=name.asc"),
-  addEmployee: (e)        => sb("pt_employees", { method:"POST", body: JSON.stringify(e) }),
-  deleteEmployee:(id)     => sb(`pt_employees?id=eq.${id}`, { method:"PATCH", body: JSON.stringify({ active:false }) }),
-  getLines:    ()         => sb("pt_lines?active=eq.true&order=id.asc"),
-  addLine:     (l)        => sb("pt_lines", { method:"POST", body: JSON.stringify(l) }),
-  deleteLine:  (id)       => sb(`pt_lines?id=eq.${id}`, { method:"PATCH", body: JSON.stringify({ active:false }) }),
-  // orders
-  getOrders:   ()         => sb("pt_orders?order=created_at.desc"),
-  addOrder:    (o)        => sb("pt_orders", { method:"POST", body: JSON.stringify(o) }),
-  updateOrder: (id, o)    => sb(`pt_orders?id=eq.${id}`, { method:"PATCH", body: JSON.stringify(o) }),
-  searchOrder: (num)      => sb(`pt_orders?order_number=eq.${encodeURIComponent(num)}`),
+  getUsers:      ()        => sbAll("pt_users", "order=full_name.asc"),
+  addUser:       (u)       => sb("pt_users", { method:"POST", body: JSON.stringify(u) }),
+  updateUser:    (id, u)   => sb(`pt_users?id=eq.${id}`, { method:"PATCH", body: JSON.stringify(u) }),
+  deleteUser:    (id)      => sb(`pt_users?id=eq.${id}`, { method:"DELETE", prefer:"" }),
+  loginUser:     (u, p)    => sb(`pt_users?username=eq.${u}&password=eq.${p}&active=eq.true`),
+  // master data — paginated to handle large catalogues (5000+ items)
+  getItems:      ()        => sbAll("pt_items", "active=eq.true&order=id.asc"),
+  addItem:       (i)       => sb("pt_items", { method:"POST", body: JSON.stringify(i) }),
+  deleteItem:    (id)      => sb(`pt_items?id=eq.${id}`, { method:"PATCH", body: JSON.stringify({ active:false }) }),
+  getEmployees:  ()        => sbAll("pt_employees", "active=eq.true&order=name.asc"),
+  addEmployee:   (e)       => sb("pt_employees", { method:"POST", body: JSON.stringify(e) }),
+  deleteEmployee:(id)      => sb(`pt_employees?id=eq.${id}`, { method:"PATCH", body: JSON.stringify({ active:false }) }),
+  getLines:      ()        => sbAll("pt_lines", "active=eq.true&order=id.asc"),
+  addLine:       (l)       => sb("pt_lines", { method:"POST", body: JSON.stringify(l) }),
+  deleteLine:    (id)      => sb(`pt_lines?id=eq.${id}`, { method:"PATCH", body: JSON.stringify({ active:false }) }),
+  // orders — paginated so all historical records load
+  getOrders:     ()        => sbAll("pt_orders", "order=created_at.desc"),
+  addOrder:      (o)       => sb("pt_orders", { method:"POST", body: JSON.stringify(o) }),
+  updateOrder:   (id, o)   => sb(`pt_orders?id=eq.${id}`, { method:"PATCH", body: JSON.stringify(o) }),
+  searchOrder:   (num)     => sb(`pt_orders?order_number=eq.${encodeURIComponent(num)}`),
 };
 
 // ─── HELPERS ───────────────────────────────────────────────────
@@ -224,6 +252,10 @@ function ProductionScheduler({ user, onLogout }) {
   const [filterEmployee, setFilterEmployee] = useState("All");
   const [filterLine, setFilterLine]         = useState("All");
   const [filterStatus, setFilterStatus]     = useState("All");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo]     = useState("");
+  const [sortField, setSortField]           = useState("created_at");
+  const [sortDir, setSortDir]               = useState("desc");
   const [toast, setToast]                   = useState(null);
   const [saving, setSaving]                 = useState(false);
 
@@ -298,12 +330,47 @@ function ProductionScheduler({ user, onLogout }) {
     setSaving(false);
   };
 
-  const filteredOrders = orders.filter(o=>{
-    const em = filterEmployee==="All"||o.employee===filterEmployee;
-    const lm = filterLine==="All"||o.line_id===filterLine;
-    const sm = filterStatus==="All"||o.status===filterStatus;
-    return em&&lm&&sm;
-  });
+  const filteredOrders = orders
+    .filter(o=>{
+      const em = filterEmployee==="All"||o.employee===filterEmployee;
+      const lm = filterLine==="All"||o.line_id===filterLine;
+      const sm = filterStatus==="All"||o.status===filterStatus;
+      const df = !filterDateFrom || new Date(o.start_datetime) >= new Date(filterDateFrom);
+      const dt = !filterDateTo   || new Date(o.start_datetime) <= new Date(filterDateTo + "T23:59:59");
+      return em&&lm&&sm&&df&&dt;
+    })
+    .sort((a,b)=>{
+      let av = a[sortField], bv = b[sortField];
+      if (sortField==="production_qty"||sortField==="end_qty") { av=Number(av)||0; bv=Number(bv)||0; }
+      else { av = av||""; bv = bv||""; }
+      if (av < bv) return sortDir==="asc"?-1:1;
+      if (av > bv) return sortDir==="asc"?1:-1;
+      return 0;
+    });
+
+  const handleSort = (field) => {
+    if (sortField===field) setSortDir(d=>d==="asc"?"desc":"asc");
+    else { setSortField(field); setSortDir("asc"); }
+  };
+
+  const exportCSV = () => {
+    const headers = ["Order #","Employee","Line ID","Line Name","Item ID","Item Name","Plan Qty","End Qty","Start","End","Duration","Status","Remarks","Created By"];
+    const rows = filteredOrders.map(o=>[
+      o.order_number, o.employee, o.line_id, o.line_name, o.item_id, o.item_name,
+      o.production_qty, o.end_qty??"",
+      o.start_datetime ? new Date(o.start_datetime).toLocaleString("en-NZ") : "",
+      o.end_datetime   ? new Date(o.end_datetime).toLocaleString("en-NZ")   : "",
+      o.end_datetime   ? getDuration(o.start_datetime, o.end_datetime) : "",
+      o.status, o.remarks||"", o.created_by||""
+    ].map(v=>`"${String(v).replace(/"/g,'""')}"`));
+    const csv = [headers.join(","), ...rows.map(r=>r.join(","))].join("\n");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([csv],{type:"text/csv"}));
+    const today = new Date().toISOString().slice(0,10);
+    a.download = `prodtrack_records_${today}.csv`;
+    a.click();
+    showToast(`Exported ${filteredOrders.length} records.`);
+  };
 
   const inProgress = orders.filter(o=>o.status==="In Progress").length;
   const completed  = orders.filter(o=>o.status==="Completed").length;
@@ -422,10 +489,7 @@ function ProductionScheduler({ user, onLogout }) {
                 </div>
                 <div className="fg">
                   <label>Item Number *</label>
-                  <select value={newForm.itemId} onChange={e=>setNewForm(f=>({...f,itemId:e.target.value}))}>
-                    <option value="">— Select Item —</option>
-                    {items.map(i=><option key={i.id} value={i.id}>{i.id} — {i.name}</option>)}
-                  </select>
+                  <ItemSearch items={items} value={newForm.itemId} onChange={v=>setNewForm(f=>({...f,itemId:v}))} />
                 </div>
                 <div className="fg">
                   <label>Start Date & Time</label>
@@ -466,27 +530,59 @@ function ProductionScheduler({ user, onLogout }) {
           {/* ════ RECORDS ════ */}
           {view==="records" && (
             <div className="au">
-              <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:10 }}>
-                <h2 style={{ fontSize:13, color:"#8B90A8", letterSpacing:2, textTransform:"uppercase" }}>
-                  All Records <span style={{ color:"#4A4F65" }}>({filteredOrders.length})</span>
-                </h2>
-                <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-                  <select value={filterEmployee} onChange={e=>setFilterEmployee(e.target.value)} style={{ width:180 }}>
-                    <option value="All">All Employees</option>
-                    {employees.map(e=><option key={e} value={e}>{e}</option>)}
-                  </select>
-                  <select value={filterLine} onChange={e=>setFilterLine(e.target.value)} style={{ width:170 }}>
-                    <option value="All">All Lines</option>
-                    {lines.map(l=><option key={l.id} value={l.id}>{l.id} — {l.name}</option>)}
-                  </select>
-                  <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={{ width:150 }}>
-                    <option value="All">All Status</option>
-                    <option value="In Progress">In Progress</option>
-                    <option value="Completed">Completed</option>
-                  </select>
-                  <button className="btn-g" style={{ fontSize:11 }} onClick={loadAll}>↻ Refresh</button>
+              {/* ── Filter Bar ── */}
+              <div style={{ background:"#13161F", border:"1px solid #2A2F45", borderRadius:8, padding:"16px 18px", marginBottom:16 }}>
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12, flexWrap:"wrap", gap:8 }}>
+                  <h2 style={{ fontSize:13, color:"#8B90A8", letterSpacing:2, textTransform:"uppercase" }}>
+                    Records <span style={{ color:"#4A4F65" }}>({filteredOrders.length})</span>
+                  </h2>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <button className="btn-g" style={{ fontSize:11 }} onClick={loadAll}>↻ Refresh</button>
+                    <button className="btn-p" style={{ fontSize:12, padding:"8px 18px", display:"flex", alignItems:"center", gap:6 }} onClick={exportCSV}>
+                      ⬇ Export CSV
+                    </button>
+                  </div>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:10 }}>
+                  <div>
+                    <label>Employee</label>
+                    <select value={filterEmployee} onChange={e=>setFilterEmployee(e.target.value)}>
+                      <option value="All">All Employees</option>
+                      {employees.map(e=><option key={e} value={e}>{e}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label>Line</label>
+                    <select value={filterLine} onChange={e=>setFilterLine(e.target.value)}>
+                      <option value="All">All Lines</option>
+                      {lines.map(l=><option key={l.id} value={l.id}>{l.id} — {l.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label>Status</label>
+                    <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)}>
+                      <option value="All">All Status</option>
+                      <option value="In Progress">In Progress</option>
+                      <option value="Completed">Completed</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label>Start Date From</label>
+                    <input type="date" value={filterDateFrom} onChange={e=>setFilterDateFrom(e.target.value)} />
+                  </div>
+                  <div>
+                    <label>Start Date To</label>
+                    <input type="date" value={filterDateTo} onChange={e=>setFilterDateTo(e.target.value)} />
+                  </div>
+                  <div style={{ display:"flex", alignItems:"flex-end" }}>
+                    <button className="btn-g" style={{ fontSize:11, width:"100%" }}
+                      onClick={()=>{ setFilterEmployee("All"); setFilterLine("All"); setFilterStatus("All"); setFilterDateFrom(""); setFilterDateTo(""); setSortField("created_at"); setSortDir("desc"); }}>
+                      ✕ Clear Filters
+                    </button>
+                  </div>
                 </div>
               </div>
+
               {filteredOrders.length===0
                 ? <div className="card" style={{ textAlign:"center", padding:48, color:"#4A4F65" }}><div style={{ fontSize:40, marginBottom:12 }}>📂</div><div>No records found.</div></div>
                 : (
@@ -494,14 +590,40 @@ function ProductionScheduler({ user, onLogout }) {
                     <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
                       <thead>
                         <tr style={{ borderBottom:"1px solid #2A2F45" }}>
-                          {["Order #","Employee","Line","Item","Plan Qty","End Qty","Start","End","Duration","Status","Remarks","Action"].map(h=>(
-                            <th key={h} style={{ padding:"10px 12px", textAlign:"left", color:"#5A5F78", letterSpacing:1, fontWeight:600, fontSize:10, textTransform:"uppercase", whiteSpace:"nowrap" }}>{h}</th>
+                          {[
+                            { label:"Order #",   field:"order_number" },
+                            { label:"Employee",  field:"employee" },
+                            { label:"Line",      field:"line_id" },
+                            { label:"Item",      field:"item_id" },
+                            { label:"Plan Qty",  field:"production_qty" },
+                            { label:"End Qty",   field:"end_qty" },
+                            { label:"Start",     field:"start_datetime" },
+                            { label:"End",       field:"end_datetime" },
+                            { label:"Duration",  field:null },
+                            { label:"Status",    field:"status" },
+                            { label:"Remarks",   field:null },
+                            { label:"Action",    field:null },
+                          ].map(({label,field})=>(
+                            <th key={label}
+                              onClick={field?()=>handleSort(field):undefined}
+                              style={{
+                                padding:"10px 12px", textAlign:"left", letterSpacing:1, fontWeight:600,
+                                fontSize:10, textTransform:"uppercase", whiteSpace:"nowrap",
+                                color: sortField===field?"#00D4AA":"#5A5F78",
+                                cursor: field?"pointer":"default",
+                                userSelect:"none",
+                              }}>
+                              {label}
+                              {field && <span style={{ marginLeft:4, opacity:.6 }}>
+                                {sortField===field ? (sortDir==="asc"?"↑":"↓") : "↕"}
+                              </span>}
+                            </th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
                         {filteredOrders.map(o=>{
-                          const sc=STATUS_COLORS[o.status]||{dot:"#6C757D"};
+                          const sc=STATUS_COLORS[o.status]||{dot:"#6C757D",bg:"#E2E3E5"};
                           const dur=o.end_datetime?getDuration(o.start_datetime,o.end_datetime):"—";
                           return (
                             <tr key={o.id} style={{ borderBottom:"1px solid #1E2135" }}>
@@ -516,7 +638,7 @@ function ProductionScheduler({ user, onLogout }) {
                                 <div style={{ overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:150 }}>{o.item_name}</div>
                               </td>
                               <td style={{ padding:"11px 12px", textAlign:"center" }}>{o.production_qty}</td>
-                              <td style={{ padding:"11px 12px", textAlign:"center", color:o.end_qty!=null?"#00D4AA":"#4A4F65" }}>{o.end_qty??  "—"}</td>
+                              <td style={{ padding:"11px 12px", textAlign:"center", color:o.end_qty!=null?"#00D4AA":"#4A4F65" }}>{o.end_qty??"—"}</td>
                               <td style={{ padding:"11px 12px", color:"#8B90A8", whiteSpace:"nowrap", fontSize:11 }}>{fmt(o.start_datetime)}</td>
                               <td style={{ padding:"11px 12px", color:"#8B90A8", whiteSpace:"nowrap", fontSize:11 }}>{fmt(o.end_datetime)}</td>
                               <td style={{ padding:"11px 12px", color:"#7B8CFF", whiteSpace:"nowrap" }}>{dur}</td>
@@ -933,6 +1055,85 @@ function UserRow({ u, onToggle, onResetPw }) {
           <input type="password" placeholder="New password" value={pw} onChange={e=>setPw(e.target.value)} style={{ flex:1, fontSize:12, padding:"7px 12px" }} />
           <button className="btn-w" style={{ fontSize:11, padding:"7px 14px" }} onClick={()=>{ onResetPw(pw); setPw(""); setShow(false); }}>Save</button>
           <button className="btn-g" style={{ fontSize:11, padding:"7px 12px" }} onClick={()=>setShow(false)}>Cancel</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ── Searchable item picker (handles 5000+ items) ─────────────
+function ItemSearch({ items, value, onChange }) {
+  const [query, setQuery]   = useState("");
+  const [open, setOpen]     = useState(false);
+  const ref                 = useRef();
+  const selected            = items.find(i => i.id === value);
+
+  const filtered = query.trim()
+    ? items.filter(i =>
+        i.id.toLowerCase().includes(query.toLowerCase()) ||
+        i.name.toLowerCase().includes(query.toLowerCase())
+      ).slice(0, 80)
+    : items.slice(0, 80);
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  return (
+    <div ref={ref} style={{ position:"relative" }}>
+      <div
+        onClick={() => setOpen(o => !o)}
+        style={{
+          background:"#1A1D27", border:`1px solid ${open?"#00D4AA":"#2A2F45"}`, borderRadius:4,
+          padding:"10px 14px", cursor:"pointer", display:"flex", justifyContent:"space-between",
+          alignItems:"center", fontSize:13, color: selected?"#E8EAF0":"#4A4F65",
+        }}>
+        <span>{selected ? `${selected.id} — ${selected.name}` : "— Select Item —"}</span>
+        <span style={{ color:"#5A5F78", fontSize:10 }}>{open?"▲":"▼"}</span>
+      </div>
+      {open && (
+        <div style={{
+          position:"absolute", zIndex:999, top:"100%", left:0, right:0, marginTop:4,
+          background:"#1A1D27", border:"1px solid #2A2F45", borderRadius:6,
+          boxShadow:"0 8px 32px rgba(0,0,0,.5)", overflow:"hidden",
+        }}>
+          <div style={{ padding:8 }}>
+            <input
+              autoFocus
+              placeholder="Search by ID or name…"
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+              onClick={e => e.stopPropagation()}
+              style={{ fontSize:12, padding:"7px 12px" }}
+            />
+          </div>
+          <div style={{ maxHeight:240, overflowY:"auto" }}>
+            {filtered.length === 0
+              ? <div style={{ padding:"12px 14px", color:"#4A4F65", fontSize:12 }}>No items found.</div>
+              : filtered.map(i => (
+                <div key={i.id}
+                  onClick={() => { onChange(i.id); setOpen(false); setQuery(""); }}
+                  style={{
+                    padding:"9px 14px", cursor:"pointer", fontSize:12,
+                    background: value===i.id ? "rgba(0,212,170,.1)" : "transparent",
+                    color: value===i.id ? "#00D4AA" : "#C8CADC",
+                    borderBottom:"1px solid #1E2135",
+                  }}
+                  onMouseEnter={e=>e.currentTarget.style.background="rgba(0,212,170,.06)"}
+                  onMouseLeave={e=>e.currentTarget.style.background=value===i.id?"rgba(0,212,170,.1)":"transparent"}>
+                  <span style={{ color:"#5A5F78", marginRight:10, fontSize:11 }}>{i.id}</span>{i.name}
+                </div>
+              ))
+            }
+            {items.length > 80 && query.trim()==="" && (
+              <div style={{ padding:"8px 14px", color:"#4A4F65", fontSize:11, borderTop:"1px solid #1E2135" }}>
+                Showing first 80 of {items.length}. Type to search all.
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
