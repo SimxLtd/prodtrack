@@ -3,8 +3,6 @@ import { useState, useEffect, useRef, useCallback } from "react";
 // ─── CONFIG ────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mdbziytahdeuegxlqggd.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1kYnppeXRhaGRldWVneGxxZ2dkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5OTI1MTIsImV4cCI6MjA5NTU2ODUxMn0.iPE2dckL4uVw-YewKxjd2IAq0Hii2-0QxDVQo52wH74";
-const AI_MODEL   = "claude-sonnet-4-20250514";
-
 // ─── SUPABASE HELPERS ──────────────────────────────────────────
 const sbHeaders = () => ({
   apikey: SUPABASE_KEY,
@@ -88,21 +86,6 @@ function dlItemTemplate(){
   const a=document.createElement("a");
   a.href=URL.createObjectURL(new Blob([ITEM_TEMPLATE],{type:"text/csv"}));
   a.download="items_template.csv"; a.click();
-}
-
-// ─── AI HELPER ─────────────────────────────────────────────────
-async function askAI(prompt) {
-  const res = await fetch("https://api.anthropic.com/v1/messages",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({
-      model:AI_MODEL, max_tokens:1000,
-      system:"You are a production efficiency analyst. Analyse the data and give 3-5 concise actionable bullet insights. Use plain text, no markdown headers, keep each bullet under 25 words.",
-      messages:[{role:"user",content:prompt}]
-    })
-  });
-  const d = await res.json();
-  return d.content?.map(b=>b.text||"").join("") || "No insights available.";
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -210,7 +193,7 @@ function ProductionScheduler({user,onLogout}){
   const [toast,setToast]=useState(null);
 
   // new order
-  const [nf,setNf]=useState({employee:"",orderNumber:"",itemId:"",lineId:"",productionQty:"",startDateTime:""});
+  const [nf,setNf]=useState({selectedEmployees:[],orderNumber:"",itemId:"",lineId:"",productionQty:"",startDateTime:""});
   // search
   const [sq,setSq]=useState(""); const [sr,setSr]=useState(null); const [snf,setSnf]=useState(false);
   // close modal
@@ -236,7 +219,7 @@ function ProductionScheduler({user,onLogout}){
   // ── Filtered + sorted orders ──
   const filteredOrders = orders
     .filter(o=>{
-      const em=fEmp==="All"||o.employee===fEmp;
+      const em=fEmp==="All"||o.employee===fEmp||(o.employees&&o.employees.includes(fEmp));
       const lm=fLine==="All"||o.line_id===fLine;
       const sm=fStatus==="All"||o.status===fStatus;
       const df=!fFrom||new Date(o.start_datetime)>=new Date(fFrom);
@@ -262,14 +245,18 @@ function ProductionScheduler({user,onLogout}){
 
   // ── Start order ──
   const handleStart=async()=>{
-    const{employee,orderNumber,itemId,lineId,productionQty}=nf;
-    if(!employee||!orderNumber||!itemId||!lineId||!productionQty){showToast("Please fill all required fields.","error");return;}
+    const{selectedEmployees,orderNumber,itemId,lineId,productionQty}=nf;
+    if(!selectedEmployees.length||!orderNumber||!itemId||!lineId||!productionQty){showToast("Please fill all required fields.","error");return;}
     if(orders.find(o=>o.order_number===orderNumber&&o.status!=="Completed")){showToast("Active order with this number exists.","error");return;}
     setSaving(true);
     try{
       const item=items.find(i=>i.id===itemId);
+      const numEmp=selectedEmployees.length;
       const o={
-        order_number:orderNumber,employee,
+        order_number:orderNumber,
+        employee:selectedEmployees.join(", "),
+        employees:selectedEmployees,
+        num_employees:numEmp,
         item_id:itemId,item_name:item?.name||"",
         line_id:lineId,line_name:lines.find(l=>l.id===lineId)?.name||"",
         production_qty:Number(productionQty),
@@ -278,8 +265,8 @@ function ProductionScheduler({user,onLogout}){
       };
       const res=await db.addOrder(o);
       setOrders(p=>[res[0],...p]);
-      setNf({employee:"",orderNumber:"",itemId:"",lineId:"",productionQty:"",startDateTime:""});
-      showToast(`Order ${orderNumber} started!`);
+      setNf({selectedEmployees:[],orderNumber:"",itemId:"",lineId:"",productionQty:"",startDateTime:""});
+      showToast(`Order ${orderNumber} started with ${numEmp} employee${numEmp>1?"s":""}!`);
       setView("dashboard");
     }catch(e){showToast("Failed: "+e.message,"error");}
     setSaving(false);
@@ -300,7 +287,8 @@ function ProductionScheduler({user,onLogout}){
     try{
       const item=items.find(i=>i.id===cm.item_id);
       const actualMin=getMinutes(cm.start_datetime,nowISO());
-      const eff=calcEff(item?.std_minutes||null,Number(cf.endQty),actualMin);
+      const numEmp=cm.num_employees||1;
+      const eff=calcEff(item?.std_minutes||null,Number(cf.endQty),actualMin,numEmp);
       const patch={end_datetime:nowISO(),end_qty:Number(cf.endQty),remarks:cf.remarks,status:"Completed",actual_minutes:Math.round(actualMin),efficiency:eff};
       await db.updateOrder(cm.id,patch);
       setOrders(p=>p.map(o=>o.id===cm.id?{...o,...patch}:o));
@@ -312,11 +300,13 @@ function ProductionScheduler({user,onLogout}){
 
   // ── Export CSV ──
   const exportCSV=()=>{
-    const H=["Order #","Employee","Line ID","Line","Item ID","Item","Std Min","Plan Qty","End Qty","Actual Min","Efficiency %","Start","End","Duration","Status","Remarks","Created By"];
+    const H=["Order #","Employees","Num Employees","Line ID","Line","Item ID","Item","Std Min","Plan Qty","End Qty","Actual Min","Man Hours","Efficiency %","Start","End","Duration","Status","Remarks","Created By"];
     const R=filteredOrders.map(o=>[
       o.order_number,o.employee,o.line_id,o.line_name,o.item_id,o.item_name,
       items.find(i=>i.id===o.item_id)?.std_minutes??"",
-      o.production_qty,o.end_qty??"",o.actual_minutes??"",o.efficiency??"",
+      o.employees?.join("; ")||o.employee,o.num_employees||1,o.line_id,o.line_name,o.item_id,o.item_name,
+      items.find(i=>i.id===o.item_id)?.std_minutes??"",
+      o.production_qty,o.end_qty??"",o.actual_minutes??"",o.actual_minutes?(o.actual_minutes/60).toFixed(2):"",o.efficiency??"",
       o.start_datetime?new Date(o.start_datetime).toLocaleString("en-NZ"):"",
       o.end_datetime?new Date(o.end_datetime).toLocaleString("en-NZ"):"",
       o.end_datetime?getDuration(o.start_datetime,o.end_datetime):"",
@@ -385,14 +375,22 @@ function ProductionScheduler({user,onLogout}){
 
           {/* ═══ NEW ORDER ═══ */}
           {view==="new"&&(
-            <div className="au" style={{maxWidth:640}}>
+            <div className="au" style={{maxWidth:660}}>
               <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase",marginBottom:24}}>Start New Production Order</h2>
               <div className="card">
-                <div className="fg"><label>Employee Name *</label>
-                  <select value={nf.employee} onChange={e=>setNf(f=>({...f,employee:e.target.value}))}>
-                    <option value="">— Select Employee —</option>
-                    {employees.map(e=><option key={e} value={e}>{e}</option>)}
-                  </select>
+                {/* Multi-employee picker */}
+                <div className="fg">
+                  <label>Employee(s) * <span style={{color:"#7B8CFF",fontSize:10,letterSpacing:0}}>— select one or more</span></label>
+                  <EmployeePicker
+                    employees={employees}
+                    selected={nf.selectedEmployees}
+                    onChange={sel=>setNf(f=>({...f,selectedEmployees:sel}))}
+                  />
+                  {nf.selectedEmployees.length>0&&(
+                    <div style={{fontSize:11,color:"#7B8CFF",marginTop:6}}>
+                      👥 {nf.selectedEmployees.length} employee{nf.selectedEmployees.length>1?"s":""} selected — man hours will be combined
+                    </div>
+                  )}
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
                   <div className="fg"><label>Order Number *</label><input placeholder="ORD-2025-001" value={nf.orderNumber} onChange={e=>setNf(f=>({...f,orderNumber:e.target.value.toUpperCase()}))}/></div>
@@ -406,7 +404,23 @@ function ProductionScheduler({user,onLogout}){
                 </div>
                 <div className="fg"><label>Item Number *</label>
                   <ItemSearch items={items} value={nf.itemId} onChange={v=>setNf(f=>({...f,itemId:v}))}/>
-                  {nf.itemId&&(()=>{const it=items.find(i=>i.id===nf.itemId); return it?.std_minutes?<div style={{fontSize:11,color:"#7B8CFF",marginTop:6}}>⏱ Standard Time: {it.std_minutes} min/item</div>:null;})()}
+                  {nf.itemId&&(()=>{
+                    const it=items.find(i=>i.id===nf.itemId);
+                    if(!it?.std_minutes) return null;
+                    const numEmp=nf.selectedEmployees.length||1;
+                    return(
+                      <div style={{background:"#13161F",border:"1px solid #2A3545",borderRadius:6,padding:"10px 14px",marginTop:8}}>
+                        <div style={{fontSize:10,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Efficiency formula preview</div>
+                        <div style={{fontSize:11,color:"#8B90A8",lineHeight:1.8}}>
+                          ⏱ Std Time: <span style={{color:"#7B8CFF"}}>{it.std_minutes} min/piece</span>
+                          &nbsp;·&nbsp; 👥 Employees: <span style={{color:"#FF9500"}}>{numEmp}</span>
+                        </div>
+                        <div style={{fontSize:11,color:"#8B90A8",marginTop:2}}>
+                          Efficiency = (std × end_qty) ÷ (actual_mins × <span style={{color:"#FF9500"}}>{numEmp}</span>) × 100
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="fg"><label>Start Date & Time</label>
                   <div style={{display:"flex",gap:10}}>
@@ -482,9 +496,9 @@ function ProductionScheduler({user,onLogout}){
                       <thead>
                         <tr style={{borderBottom:"1px solid #2A2F45"}}>
                           {[
-                            ["Order #","order_number"],["Employee","employee"],["Line","line_id"],["Item","item_id"],
+                            ["Order #","order_number"],["Employee","employee"],["Line","line_id"],["Item","item_id"],["Man Hrs","actual_minutes"],
                             ["Plan Qty","production_qty"],["End Qty","end_qty"],["Std Min",null],
-                            ["Actual Min","actual_minutes"],["Efficiency","efficiency"],
+                            ["Actual Min","actual_minutes"],["Man Hrs",null],["Efficiency","efficiency"],
                             ["Start","start_datetime"],["End","end_datetime"],["Duration",null],
                             ["Status","status"],["Remarks",null],["Action",null]
                           ].map(([h,f])=>(
@@ -504,7 +518,10 @@ function ProductionScheduler({user,onLogout}){
                           return(
                             <tr key={o.id} style={{borderBottom:"1px solid #1E2135"}}>
                               <td style={{padding:"9px 10px",color:"#00D4AA",fontWeight:600,whiteSpace:"nowrap"}}>{o.order_number}</td>
-                              <td style={{padding:"9px 10px",color:"#C8CADC",whiteSpace:"nowrap"}}>{o.employee}</td>
+                              <td style={{padding:"9px 10px",color:"#C8CADC",maxWidth:140}}>
+                              <div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.employees?.join(", ")||o.employee}</div>
+                              {(o.num_employees||1)>1&&<div style={{fontSize:10,color:"#FF9500"}}>👥 {o.num_employees} employees</div>}
+                            </td>
                               <td style={{padding:"9px 10px",color:"#7B8CFF"}}>
                                 <div style={{fontSize:10,color:"#5A5F78"}}>{o.line_id}</div>
                                 <div style={{whiteSpace:"nowrap"}}>{o.line_name}</div>
@@ -517,6 +534,7 @@ function ProductionScheduler({user,onLogout}){
                               <td style={{padding:"9px 10px",textAlign:"center",color:o.end_qty!=null?"#00D4AA":"#4A4F65"}}>{o.end_qty??"—"}</td>
                               <td style={{padding:"9px 10px",textAlign:"center",color:"#7B8CFF"}}>{stdMin??<span style={{color:"#4A4F65"}}>—</span>}</td>
                               <td style={{padding:"9px 10px",textAlign:"center",color:"#C8CADC"}}>{o.actual_minutes??<span style={{color:"#4A4F65"}}>—</span>}</td>
+                              <td style={{padding:"9px 10px",textAlign:"center",color:"#FF9500"}}>{o.actual_minutes?((o.actual_minutes/60).toFixed(2))+"h":<span style={{color:"#4A4F65"}}>—</span>}</td>
                               <td style={{padding:"9px 10px",textAlign:"center"}}>
                                 {eff!=null?(
                                   <div>
@@ -572,8 +590,9 @@ function ProductionScheduler({user,onLogout}){
               <div style={{fontSize:18,color:"#00D4AA",fontWeight:700}}>{cm.order_number}</div>
               <div style={{fontSize:12,color:"#8B90A8",marginTop:4}}>{cm.item_id} — {cm.item_name}</div>
               <div style={{fontSize:11,color:"#5A5F78",marginTop:2}}>Line: <span style={{color:"#7B8CFF"}}>{cm.line_id} — {cm.line_name}</span></div>
-              <div style={{fontSize:11,color:"#5A5F78"}}>Employee: {cm.employee} | Plan Qty: <span style={{color:"#C8CADC"}}>{cm.production_qty}</span></div>
-              {(()=>{const it=items.find(i=>i.id===cm.item_id); return it?.std_minutes?<div style={{fontSize:11,color:"#7B8CFF",marginTop:4}}>⏱ Standard Time: {it.std_minutes} min/item → Efficiency = (std × end qty) ÷ actual mins × 100</div>:null;})()}
+              <div style={{fontSize:11,color:"#5A5F78"}}>Employees: <span style={{color:"#C8CADC"}}>{cm.employees?.join(", ")||cm.employee}</span></div>
+              <div style={{fontSize:11,color:"#5A5F78"}}>👥 <span style={{color:"#FF9500"}}>{cm.num_employees||1} employee{(cm.num_employees||1)>1?"s":""}</span> | Plan Qty: <span style={{color:"#C8CADC"}}>{cm.production_qty}</span></div>
+              {(()=>{const it=items.find(i=>i.id===cm.item_id); return it?.std_minutes?<div style={{fontSize:11,color:"#7B8CFF",marginTop:4}}>⏱ Std: {it.std_minutes} min/piece × end_qty ÷ (actual_mins × {cm.num_employees||1} employees) × 100</div>:null;})()}
             </div>
             <div className="fg"><label>End Date & Time (Auto-captured)</label><input value={fmt(nowISO())} readOnly style={{color:"#00D4AA",opacity:.8}}/></div>
             <div className="fg"><label>Ending Quantity *</label><input type="number" min="0" placeholder="Actual produced quantity" value={cf.endQty} onChange={e=>setCf(f=>({...f,endQty:e.target.value}))} autoFocus/></div>
@@ -600,100 +619,101 @@ function ProductionScheduler({user,onLogout}){
 //  DASHBOARD
 // ══════════════════════════════════════════════════════════════
 function Dashboard({orders,todayOrders,todayCompleted,todayEffAvg,items,onNewOrder,onClose,reload}){
-  const [aiText,setAiText]=useState(""); const [aiLoading,setAiLoading]=useState(false);
   const active=orders.filter(o=>o.status==="In Progress");
   const totalCompleted=orders.filter(o=>o.status==="Completed");
   const allEfficiencies=totalCompleted.filter(o=>o.efficiency!=null).map(o=>o.efficiency);
   const overallAvgEff=allEfficiencies.length?Math.round(allEfficiencies.reduce((a,b)=>a+b)/allEfficiencies.length):null;
 
-  const runAI=async()=>{
-    setAiLoading(true); setAiText("");
-    try{
-      const snap={
-        todayStarted:todayOrders.length,
-        todayCompleted:todayCompleted.length,
-        todayAvgEfficiency:todayEffAvg,
-        overallAvgEfficiency:overallAvgEff,
-        totalOrders:orders.length,
-        activeOrders:active.length,
-        recentCompleted:totalCompleted.slice(0,20).map(o=>({
-          order:o.order_number,employee:o.employee,line:o.line_id,item:o.item_id,
-          plannedQty:o.production_qty,endQty:o.end_qty,efficiency:o.efficiency,actualMin:o.actual_minutes,
-        })),
-        employeeEfficiency:[...new Set(totalCompleted.map(o=>o.employee))].map(emp=>{
-          const ords=totalCompleted.filter(o=>o.employee===emp&&o.efficiency!=null);
-          return{employee:emp,avgEff:ords.length?Math.round(ords.reduce((a,b)=>a+b.efficiency,0)/ords.length):null,count:ords.length};
-        }).filter(e=>e.avgEff!=null).sort((a,b)=>a.avgEff-b.avgEff).slice(0,10),
-        lineEfficiency:[...new Set(totalCompleted.map(o=>o.line_id))].map(lid=>{
-          const ords=totalCompleted.filter(o=>o.line_id===lid&&o.efficiency!=null);
-          return{line:lid,avgEff:ords.length?Math.round(ords.reduce((a,b)=>a+b.efficiency,0)/ords.length):null,count:ords.length};
-        }).filter(l=>l.avgEff!=null),
-      };
-      const text=await askAI(`Production data snapshot:\n${JSON.stringify(snap,null,2)}\n\nGive 4-5 actionable bullet-point insights about efficiency, bottlenecks, and improvements.`);
-      setAiText(text);
-    }catch(e){setAiText("AI analysis unavailable: "+e.message);}
-    setAiLoading(false);
-  };
+  // ── Man Hours: group active orders by line, sum actual_minutes per employee ──
+  const lineManHours = (() => {
+    const map = {};
+    // For active orders — use elapsed minutes so far
+    active.forEach(o => {
+      const key = o.line_id;
+      if (!map[key]) map[key] = { line_id:o.line_id, line_name:o.line_name, employees:[], totalMins:0 };
+      const elapsedMins = (Date.now() - new Date(o.start_datetime)) / 60000;
+      map[key].employees.push(o.employee);
+      map[key].totalMins += elapsedMins;
+    });
+    // For today's completed orders — use actual_minutes
+    todayCompleted.forEach(o => {
+      const key = o.line_id;
+      if (!map[key]) map[key] = { line_id:o.line_id, line_name:o.line_name, employees:[], totalMins:0 };
+      map[key].employees.push(o.employee);
+      map[key].totalMins += o.actual_minutes || 0;
+    });
+    return Object.values(map).map(l => ({
+      ...l,
+      employees: [...new Set(l.employees)],
+      totalHours: (l.totalMins / 60).toFixed(2),
+    })).sort((a,b) => b.totalMins - a.totalMins);
+  })();
+
+  // ── Today's total man hours across all lines ──
+  const todayTotalManHours = (() => {
+    let total = 0;
+    active.forEach(o => { total += (Date.now() - new Date(o.start_datetime)) / 60000; });
+    todayCompleted.forEach(o => { total += o.actual_minutes || 0; });
+    return (total / 60).toFixed(2);
+  })();
 
   return(
     <div className="au">
       {/* KPI Row */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))",gap:14,marginBottom:22}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(155px,1fr))",gap:14,marginBottom:22}}>
         {[
-          {label:"TODAY STARTED",   val:todayOrders.length,   color:"#7B8CFF", icon:"📋"},
-          {label:"TODAY COMPLETED", val:todayCompleted.length, color:"#00D4AA", icon:"✅"},
-          {label:"TODAY EFF AVG",   val:todayEffAvg!=null?todayEffAvg+"%":"—", color:effColor(todayEffAvg), icon:"⚡"},
-          {label:"ACTIVE ORDERS",   val:active.length,         color:"#FFC107", icon:"🔄"},
-          {label:"TOTAL ORDERS",    val:orders.length,         color:"#8B90A8", icon:"📊"},
-          {label:"OVERALL EFF AVG", val:overallAvgEff!=null?overallAvgEff+"%":"—", color:effColor(overallAvgEff), icon:"🎯"},
+          {label:"TODAY STARTED",    val:todayOrders.length,                          color:"#7B8CFF", icon:"📋"},
+          {label:"TODAY COMPLETED",  val:todayCompleted.length,                       color:"#00D4AA", icon:"✅"},
+          {label:"TODAY EFF AVG",    val:todayEffAvg!=null?todayEffAvg+"%":"—",       color:effColor(todayEffAvg), icon:"⚡"},
+          {label:"ACTIVE ORDERS",    val:active.length,                               color:"#FFC107", icon:"🔄"},
+          {label:"TOTAL ORDERS",     val:orders.length,                               color:"#8B90A8", icon:"📊"},
+          {label:"OVERALL EFF AVG",  val:overallAvgEff!=null?overallAvgEff+"%":"—",   color:effColor(overallAvgEff), icon:"🎯"},
+          {label:"TODAY MAN HRS",    val:todayTotalManHours+"h",                      color:"#FF9500", icon:"👥"},
         ].map(s=>(
           <div key={s.label} className="card" style={{display:"flex",alignItems:"center",gap:12,padding:"14px 16px"}}>
-            <div style={{fontSize:24}}>{s.icon}</div>
+            <div style={{fontSize:22}}>{s.icon}</div>
             <div>
-              <div style={{fontSize:22,fontWeight:700,color:s.color,lineHeight:1}}>{s.val}</div>
+              <div style={{fontSize:20,fontWeight:700,color:s.color,lineHeight:1}}>{s.val}</div>
               <div style={{fontSize:9,color:"#5A5F78",letterSpacing:1.5,marginTop:3,textTransform:"uppercase"}}>{s.label}</div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* AI Panel */}
-      <div className="card" style={{marginBottom:22,borderColor:"#2A3545"}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:aiText?14:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <span style={{fontSize:18}}>🤖</span>
-            <div>
-              <div style={{fontSize:13,fontWeight:700,color:"#E8EAF0"}}>AI Production Insights</div>
-              <div style={{fontSize:10,color:"#5A5F78"}}>Powered by Claude — analyses your production data</div>
-            </div>
+      {/* Man Hours by Line */}
+      {lineManHours.length>0&&(
+        <div className="card" style={{marginBottom:22}}>
+          <div style={{fontSize:11,color:"#FF9500",letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>👥 Man Hours by Production Line (Today)</div>
+          <div style={{display:"grid",gap:10}}>
+            {lineManHours.map(l=>{
+              const empCount=l.employees.length;
+              const hrs=Number(l.totalHours);
+              const barPct=Math.min((hrs/Math.max(...lineManHours.map(x=>Number(x.totalHours)),1))*100,100);
+              return(
+                <div key={l.line_id} style={{background:"#13161F",borderRadius:6,padding:"10px 14px"}}>
+                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6,flexWrap:"wrap",gap:6}}>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <span style={{color:"#7B8CFF",fontWeight:700,fontSize:12}}>{l.line_id}</span>
+                      <span style={{color:"#C8CADC",fontSize:12}}>{l.line_name}</span>
+                      <span style={{background:"rgba(255,149,0,.12)",color:"#FF9500",fontSize:10,padding:"2px 8px",borderRadius:12,fontWeight:600}}>
+                        {empCount} employee{empCount!==1?"s":""}
+                      </span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:12}}>
+                      <span style={{fontSize:11,color:"#8B90A8"}}>{l.employees.join(", ")}</span>
+                      <span style={{fontSize:16,fontWeight:700,color:"#FF9500"}}>{hrs.toFixed(2)}h</span>
+                    </div>
+                  </div>
+                  <div style={{height:5,background:"#2A2F45",borderRadius:3,overflow:"hidden"}}>
+                    <div style={{height:"100%",width:barPct+"%",background:"#FF9500",borderRadius:3,transition:"width .3s"}}/>
+                  </div>
+                  <div style={{fontSize:10,color:"#5A5F78",marginTop:4}}>{(hrs*60).toFixed(0)} total minutes across {empCount} employee{empCount!==1?"s":""}</div>
+                </div>
+              );
+            })}
           </div>
-          <button className="bw" onClick={runAI} disabled={aiLoading} style={{fontSize:12}}>
-            {aiLoading?"⏳ Analysing…":"✨ Run Analysis"}
-          </button>
         </div>
-        {aiLoading&&(
-          <div style={{background:"#0F1117",borderRadius:6,padding:16,marginTop:12}}>
-            <div style={{display:"flex",gap:8,alignItems:"center",color:"#8B90A8",fontSize:12}}>
-              <span style={{animation:"spin 1s linear infinite",display:"inline-block"}}>⏳</span>
-              Analysing {orders.filter(o=>o.status==="Completed").length} completed orders…
-            </div>
-          </div>
-        )}
-        {aiText&&!aiLoading&&(
-          <div style={{background:"#0F1117",borderRadius:6,padding:16,marginTop:12}}>
-            {aiText.split("\n").filter(l=>l.trim()).map((line,i)=>(
-              <div key={i} style={{display:"flex",gap:10,marginBottom:10,fontSize:13,color:"#C8CADC",lineHeight:1.6}}>
-                <span style={{color:"#FF9500",flexShrink:0,marginTop:2}}>▸</span>
-                <span>{line.replace(/^[•\-\*]\s*/,"")}</span>
-              </div>
-            ))}
-            <div style={{fontSize:10,color:"#3A3F55",marginTop:8}}>Based on {orders.filter(o=>o.status==="Completed").length} completed orders</div>
-          </div>
-        )}
-        {!aiText&&!aiLoading&&(
-          <div style={{fontSize:12,color:"#4A4F65",marginTop:10}}>Click "Run Analysis" to get AI-powered insights on efficiency, bottlenecks, and recommendations.</div>
-        )}
-      </div>
+      )}
 
       {/* Active Orders */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
@@ -732,7 +752,7 @@ function OrderCard({order:o,item,onClose}){
           </div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:"5px 20px"}}>
             {[
-              ["Employee",o.employee],["Line",`${o.line_id} — ${o.line_name}`],["Item",`${o.item_id} — ${o.item_name}`],
+              ["Employee",(o.employees?.join(", ")||o.employee)+(( o.num_employees||1)>1?" ("+o.num_employees+"👥)":"")],["Line",`${o.line_id} — ${o.line_name}`],["Item",`${o.item_id} — ${o.item_name}`],
               ["Plan Qty",o.production_qty],["Started",fmt(o.start_datetime)],
               ...(o.status==="Completed"
                 ?[["Ended",fmt(o.end_datetime)],["End Qty",o.end_qty],["Duration",getDuration(o.start_datetime,o.end_datetime)],
@@ -748,6 +768,58 @@ function OrderCard({order:o,item,onClose}){
         </div>
         {onClose&&<button className="bd" onClick={onClose} style={{alignSelf:"flex-start",fontSize:12}}>⏹ End Order</button>}
       </div>
+    </div>
+  );
+}
+
+
+// ══════════════════════════════════════════════════════════════
+//  EMPLOYEE PICKER (multi-select with search + pills)
+// ══════════════════════════════════════════════════════════════
+function EmployeePicker({employees,selected,onChange}){
+  const [q,setQ]=useState("");
+  const filtered=q.trim()?employees.filter(e=>e.toLowerCase().includes(q.toLowerCase())):employees;
+  const toggle=(name)=>{
+    if(selected.includes(name)) onChange(selected.filter(e=>e!==name));
+    else onChange([...selected,name]);
+  };
+  const scrollRef=useRef();
+  return(
+    <div>
+      <div style={{background:"#1A1D27",border:"1px solid #00D4AA",borderRadius:4,overflow:"hidden"}}>
+        <input
+          placeholder="Search employees…"
+          value={q} onChange={e=>setQ(e.target.value)}
+          style={{background:"#13161F",border:"none",borderBottom:"1px solid #2A2F45",color:"#E8EAF0",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,padding:"8px 12px",width:"100%",outline:"none"}}
+        />
+        <div ref={scrollRef} style={{maxHeight:160,overflowY:"auto"}}>
+          {filtered.length===0&&<div style={{padding:"10px 14px",color:"#4A4F65",fontSize:12}}>No employees found.</div>}
+          {filtered.map(e=>{
+            const on=selected.includes(e);
+            return(
+              <div key={e} onClick={()=>toggle(e)}
+                style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",cursor:"pointer",borderBottom:"1px solid #1E2135",background:on?"rgba(0,212,170,.07)":"transparent"}}
+                onMouseEnter={ev=>ev.currentTarget.style.background=on?"rgba(0,212,170,.1)":"rgba(255,255,255,.02)"}
+                onMouseLeave={ev=>ev.currentTarget.style.background=on?"rgba(0,212,170,.07)":"transparent"}>
+                <div style={{width:14,height:14,borderRadius:3,border:`1px solid ${on?"#00D4AA":"#3A3F55"}`,background:on?"#00D4AA":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                  {on&&<span style={{color:"#0F1117",fontSize:10,fontWeight:700,lineHeight:1}}>✓</span>}
+                </div>
+                <span style={{fontSize:12,color:on?"#00D4AA":"#C8CADC",fontWeight:on?700:400}}>{e}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+      {selected.length>0&&(
+        <div style={{display:"flex",flexWrap:"wrap",gap:6,marginTop:8}}>
+          {selected.map(e=>(
+            <div key={e} style={{background:"rgba(0,212,170,.1)",border:"1px solid rgba(0,212,170,.25)",color:"#00D4AA",fontSize:10,padding:"3px 10px",borderRadius:12,display:"flex",alignItems:"center",gap:5}}>
+              {e}
+              <span onClick={()=>toggle(e)} style={{cursor:"pointer",opacity:.7,fontSize:12}} onMouseEnter={ev=>ev.target.style.opacity=1} onMouseLeave={ev=>ev.target.style.opacity=.7}>✕</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
