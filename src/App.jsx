@@ -1,6 +1,3 @@
-bash
-
-cat > /mnt/user-data/outputs/production_scheduler.jsx << 'ENDOFFILE'
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // ─── CONFIG ────────────────────────────────────────────────────
