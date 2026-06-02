@@ -355,13 +355,13 @@ function ProductionScheduler({user,onLogout}){
 
   // ── Today stats ──
   const td=today();
-  const todayOrders=orders.filter(o=>o.created_at?.startsWith(td));
-  const todayDone=todayOrders.filter(o=>o.status==="Completed");
+  const todayOrders=orders.filter(o=>o.start_datetime?.startsWith(td));
+  const todayDone=orders.filter(o=>o.status==="Completed"&&o.end_datetime?.startsWith(td));
   const todayEffAvg=(()=>{const e=todayDone.filter(o=>o.efficiency!=null).map(o=>o.efficiency); return e.length?Math.round(e.reduce((a,b)=>a+b)/e.length):null;})();
   const activeOrders=orders.filter(o=>o.status==="In Progress");
 
-  // Worker sees only their orders
-  const myActiveOrders=isAdmin?activeOrders:activeOrders.filter(o=>(o.employees||[o.employee]).includes(user.full_name));
+  // All active orders shown to everyone
+  const myActiveOrders=activeOrders;
 
   const TABS=isAdmin
     ?[{id:"dashboard",label:"Dashboard"},{id:"new",label:"+ New Order"},{id:"search",label:"Search"},{id:"records",label:"Records"},{id:"admin",label:"⚙ Admin"}]
@@ -401,7 +401,7 @@ function ProductionScheduler({user,onLogout}){
         ):(
           <>
           {/* ═══ DASHBOARD ═══ */}
-          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={isAdmin?activeOrders:myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} reload={loadAll}/>}
+          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={activeOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} reload={loadAll}/>}
 
           {/* ═══ NEW ORDER ═══ */}
           {view==="new"&&(
