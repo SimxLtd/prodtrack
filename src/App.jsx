@@ -864,7 +864,7 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
   // Users
   const addUser=async()=>{ const{username,password,full_name,role}=newUser; if(!username||!password||!full_name){showToast("All fields required.","error");return;} setSaving(true); try{const r=await db.addUser({username:username.trim().toLowerCase(),password:password.trim(),full_name:full_name.trim(),role});setUsers(p=>[...p,r[0]]);setNewUser({username:"",password:"",full_name:"",role:"worker"});showToast("User added.");}catch(e){showToast("Failed: "+e.message,"error");} setSaving(false); };
   const toggleUser=async u=>{try{await db.updateUser(u.id,{active:!u.active});setUsers(p=>p.map(x=>x.id===u.id?{...x,active:!x.active}:x));showToast(u.active?"Deactivated.":"Activated.");}catch{showToast("Failed.","error");}};
-  const resetPw=async(u,pw)=>{if(!pw)return;try{await db.updateUser(u.id,{password:pw});showToast(`Password updated for ${u.username}.`);}catch{showToast("Failed.","error")or");}};
+  const resetPw=async(u,pw)=>{if(!pw)return;try{await db.updateUser(u.id,{password:pw});showToast(`Password updated for ${u.username}.`);}catch{showToast("Failed.","error");}};
 
   // Items
   const addItem=async()=>{if(!newItem.id||!newItem.name){showToast("ID and Name required.","error");return;}if(items.find(i=>i.id===newItem.id.trim().toUpperCase())){showToast("Item ID exists.","error");return;}setSaving(true);try{const it={id:newItem.id.trim().toUpperCase(),name:newItem.name.trim(),std_minutes:newItem.std_minutes?Number(newItem.std_minutes):null};await db.addItem(it);setItems(p=>[...p,it]);setNewItem({id:"",name:"",std_minutes:""});showToast("Item added.");}catch(e){showToast("Failed: "+e.message,"error");}setSaving(false);};
