@@ -1186,8 +1186,3 @@ function UserRow({u,onToggle,onResetPw}){
     </div>
   );
 }
-ENDOFFILE
-echo "Done: $(wc -l < /mnt/user-data/outputs/production_scheduler.jsx) lines"
-Output
-
-Done: 1188 lines
