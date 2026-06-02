@@ -742,7 +742,7 @@ function OrderCard({order:o,items,onClose,onPause,onResume}){
               <div style={{fontSize:8,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>Break Log</div>
               {breaks.map((b,i)=>{
                 const dur=b.end_time?Math.round((new Date(b.end_time)-new Date(b.start_time))/60000)+"m":"running";
-                return<div key={i} className="brk-row"><span style={{color:"#FF9500",fontWeight:700,width:46,flexShrink:0}}>Break {i+1}</span><span>{fmt(b.start_time)} → {b.end_time?fmt(b.end_time):"ongoing…"}</span><span style={{marginLeft:"auto",color:b.end_time?"#C8CADC":"#FF9500"}}>{dur}</span></div>;
+                return(<div key={i} className="brk-row"><span style={{color:"#FF9500",fontWeight:700,width:46,flexShrink:0}}>Break {i+1}</span><span>{fmt(b.start_time)} → {b.end_time?fmt(b.end_time):"ongoing…"}</span><span style={{marginLeft:"auto",color:b.end_time?"#C8CADC":"#FF9500"}}>{dur}</span></div>);
               })}
             </div>
           )}
@@ -864,7 +864,7 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
   // Users
   const addUser=async()=>{ const{username,password,full_name,role}=newUser; if(!username||!password||!full_name){showToast("All fields required.","error");return;} setSaving(true); try{const r=await db.addUser({username:username.trim().toLowerCase(),password:password.trim(),full_name:full_name.trim(),role});setUsers(p=>[...p,r[0]]);setNewUser({username:"",password:"",full_name:"",role:"worker"});showToast("User added.");}catch(e){showToast("Failed: "+e.message,"error");} setSaving(false); };
   const toggleUser=async u=>{try{await db.updateUser(u.id,{active:!u.active});setUsers(p=>p.map(x=>x.id===u.id?{...x,active:!x.active}:x));showToast(u.active?"Deactivated.":"Activated.");}catch{showToast("Failed.","error");}};
-  const resetPw=async(u,pw)=>{if(!pw)return;try{await db.updateUser(u.id,{password:pw});showToast(`Password updated for ${u.username}.`);}catch{showToast("Failed.","error");}};
+  const resetPw=async(u,pw)=>{if(!pw)return;try{await db.updateUser(u.id,{password:pw});showToast(`Password updated for ${u.username}.`);}catch{showToast("Failed.","error")or");}};
 
   // Items
   const addItem=async()=>{if(!newItem.id||!newItem.name){showToast("ID and Name required.","error");return;}if(items.find(i=>i.id===newItem.id.trim().toUpperCase())){showToast("Item ID exists.","error");return;}setSaving(true);try{const it={id:newItem.id.trim().toUpperCase(),name:newItem.name.trim(),std_minutes:newItem.std_minutes?Number(newItem.std_minutes):null};await db.addItem(it);setItems(p=>[...p,it]);setNewItem({id:"",name:"",std_minutes:""});showToast("Item added.");}catch(e){showToast("Failed: "+e.message,"error");}setSaving(false);};
@@ -905,10 +905,7 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
           <div className="card" style={{marginBottom:14}}>
             <div style={{fontSize:11,color:"#FF9500",letterSpacing:1,marginBottom:10,textTransform:"uppercase"}}>Upload Planned Orders (CSV)</div>
             <div style={{fontSize:12,color:"#8B90A8",lineHeight:1.8,marginBottom:10}}>Columns: <span style={{color:"#00D4AA"}}>order_number, item_id, line_id, production_qty, scheduled_datetime</span></div>
-            <div style={{background:"#0F1117",borderRadius:5,padding:"10px 14px",fontSize:11,color:"#5A8A7A",lineHeight:1.7,marginBottom:12,fontFamily:"monospace"}}>
-              order_number,item_id,line_id,production_qty,scheduled_datetime<br/>
-              ORD-2025-001,ITM-001,LINE-01,100,2026-06-01 08:00
-            </div>
+            <pre style={{background:"#0F1117",borderRadius:5,padding:"10px 14px",fontSize:11,color:"#5A8A7A",lineHeight:1.7,marginBottom:12,fontFamily:"monospace",whiteSpace:"pre-wrap"}}>{"order_number,item_id,line_id,production_qty,scheduled_datetime\nORD-2025-001,ITM-001,LINE-01,100,2026-06-01 08:00\nORD-2025-002,ITM-002,LINE-04,200,2026-06-02 09:30"}</pre>
             <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
               <input ref={plannedFileRef} type="file" accept=".csv" style={{display:"none"}} onChange={handlePlannedFile}/>
               <button className="bw" onClick={()=>plannedFileRef.current.click()}>⬆ Upload CSV</button>
