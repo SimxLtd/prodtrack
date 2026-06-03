@@ -48,7 +48,10 @@ const db = {
 const fmt    = dt => !dt?"—":new Date(dt).toLocaleString("en-NZ",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit"});
 const fmtT   = dt => !dt?"—":new Date(dt).toLocaleTimeString("en-NZ",{hour:"2-digit",minute:"2-digit"});
 const nowISO = () => new Date().toISOString();
-const today  = () => new Date().toISOString().slice(0,10);
+const today  = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+};
 const minsTo = (s,e) => (new Date(e)-new Date(s))/60000;
 const getDur  = (s,e) => { const ms=new Date(e)-new Date(s); return `${Math.floor(ms/3600000)}h ${Math.floor((ms%3600000)/60000)}m ${Math.floor((ms%60000)/1000)}s`; };
 const getElap = s => { const ms=Date.now()-new Date(s); return `${Math.floor(ms/3600000)}h ${Math.floor((ms%3600000)/60000)}m`; };
@@ -355,13 +358,18 @@ function ProductionScheduler({user,onLogout}){
 
   // ── Today stats ──
   const td=today();
-  const todayOrders=orders.filter(o=>o.start_datetime?.startsWith(td));
-  const todayDone=orders.filter(o=>o.status==="Completed"&&o.end_datetime?.startsWith(td));
-  const todayEffAvg=(()=>{const e=todayDone.filter(o=>o.efficiency!=null).map(o=>o.efficiency); return e.length?Math.round(e.reduce((a,b)=>a+b)/e.length):null;})();
+  // Convert UTC timestamp to local date string for comparison
+  const toLocalDate=dt=>{if(!dt)return"";const d=new Date(dt);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
+  // Helper: is this order assigned to the current user?
+  const isMine=o=>(o.employees||[o.employee]).includes(user.full_name);
+  // Active orders
   const activeOrders=orders.filter(o=>o.status==="In Progress");
-
-  // All active orders shown to everyone
+  // Worker sees only their own active orders; admin sees all
   const myActiveOrders=activeOrders;
+  // Today's orders by local start date — ALL employees for both admin and worker
+  const todayOrders=orders.filter(o=>toLocalDate(o.start_datetime)===td);
+  const todayDone=todayOrders.filter(o=>o.status==="Completed");
+  const todayEffAvg=(()=>{const e=todayDone.filter(o=>o.efficiency!=null).map(o=>o.efficiency);return e.length?Math.round(e.reduce((a,b)=>a+b)/e.length):null;})();
 
   const TABS=isAdmin
     ?[{id:"dashboard",label:"Dashboard"},{id:"new",label:"+ New Order"},{id:"search",label:"Search"},{id:"records",label:"Records"},{id:"admin",label:"⚙ Admin"}]
@@ -401,7 +409,7 @@ function ProductionScheduler({user,onLogout}){
         ):(
           <>
           {/* ═══ DASHBOARD ═══ */}
-          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={activeOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} reload={loadAll}/>}
+          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} reload={loadAll}/>}
 
           {/* ═══ NEW ORDER ═══ */}
           {view==="new"&&(
@@ -642,9 +650,11 @@ function ProductionScheduler({user,onLogout}){
 // ══════════════════════════════════════════════════════════════
 function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,reload}){
   const overallEffAvg=(()=>{const e=orders.filter(o=>o.status==="Completed"&&o.efficiency!=null).map(o=>o.efficiency);return e.length?Math.round(e.reduce((a,b)=>a+b)/e.length):null;})();
+  const td=(()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;})();
+  const toLocalDate=dt=>{if(!dt)return"";const d=new Date(dt);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
   let todayManMins=0;
   activeOrders.forEach(o=>{if(!o.is_paused)todayManMins+=(Date.now()-new Date(o.start_datetime)-((o.break_minutes||0)*60000))/60000;else todayManMins+=minsTo(o.start_datetime,o.paused_at||nowISO())-(o.break_minutes||0);});
-  orders.filter(o=>o.status==="Completed"&&o.created_at?.startsWith(new Date().toISOString().slice(0,10))).forEach(o=>{todayManMins+=o.working_minutes||o.actual_minutes||0;});
+  orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime)===td).forEach(o=>{todayManMins+=o.working_minutes||o.actual_minutes||0;});
   const todayManHrs=(todayManMins/60).toFixed(1);
 
   // Man hours by line (today)
@@ -655,7 +665,7 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
     (o.employees||[o.employee]).forEach(e=>{if(!mhByLine[o.line_id].emps.includes(e))mhByLine[o.line_id].emps.push(e);});
   };
   activeOrders.forEach(o=>{const m=o.is_paused?minsTo(o.start_datetime,o.paused_at||nowISO())-(o.break_minutes||0):((Date.now()-new Date(o.start_datetime))/60000)-(o.break_minutes||0);addToLine(o,Math.max(m,0));});
-  todayDone.forEach(o=>addToLine(o,o.working_minutes||o.actual_minutes||0));
+  orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime)===td).forEach(o=>addToLine(o,o.working_minutes||o.actual_minutes||0));
   const mhArr=Object.values(mhByLine).sort((a,b)=>b.mins-a.mins);
   const maxMins=Math.max(...mhArr.map(l=>l.mins),1);
 
