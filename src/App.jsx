@@ -318,13 +318,15 @@ function ProductionScheduler({user,onLogout}){
   };
 
   // ── Records ──
+  const toNZDate=dt=>{if(!dt)return"";return new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});};
   const filteredOrders=orders
     .filter(o=>{
       const em=fEmp==="All"||o.employee===fEmp||(o.employees&&o.employees.includes(fEmp));
       const lm=fLine==="All"||o.line_id===fLine;
       const sm=fStatus==="All"||o.status===fStatus;
-      const df=!fFrom||new Date(o.start_datetime)>=new Date(fFrom);
-      const dt=!fTo||new Date(o.start_datetime)<=new Date(fTo+"T23:59:59");
+      const orderDate=toNZDate(o.start_datetime);
+      const df=!fFrom||orderDate>=fFrom;
+      const dt=!fTo||orderDate<=fTo;
       return em&&lm&&sm&&df&&dt;
     })
     .sort((a,b)=>{
