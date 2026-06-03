@@ -45,13 +45,11 @@ const db = {
 };
 
 // ─── HELPERS ───────────────────────────────────────────────────
-const fmt    = dt => !dt?"—":new Date(dt).toLocaleString("en-NZ",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit"});
-const fmtT   = dt => !dt?"—":new Date(dt).toLocaleTimeString("en-NZ",{hour:"2-digit",minute:"2-digit"});
+const NZ_TZ  = "Pacific/Auckland";
+const fmt    = dt => !dt?"—":new Date(dt).toLocaleString("en-NZ",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",timeZone:NZ_TZ});
+const fmtT   = dt => !dt?"—":new Date(dt).toLocaleTimeString("en-NZ",{hour:"2-digit",minute:"2-digit",timeZone:NZ_TZ});
 const nowISO = () => new Date().toISOString();
-const today  = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-};
+const today  = () => new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"});
 const minsTo = (s,e) => (new Date(e)-new Date(s))/60000;
 const getDur  = (s,e) => { const ms=new Date(e)-new Date(s); return `${Math.floor(ms/3600000)}h ${Math.floor((ms%3600000)/60000)}m ${Math.floor((ms%60000)/1000)}s`; };
 const getElap = s => { const ms=Date.now()-new Date(s); return `${Math.floor(ms/3600000)}h ${Math.floor((ms%3600000)/60000)}m`; };
@@ -346,8 +344,8 @@ function ProductionScheduler({user,onLogout}){
       o.actual_minutes??"",o.break_minutes??"",o.working_minutes??"",
       o.working_minutes?((o.working_minutes/60).toFixed(2)):"",
       o.efficiency??"",
-      o.start_datetime?new Date(o.start_datetime).toLocaleString("en-NZ"):"",
-      o.end_datetime?new Date(o.end_datetime).toLocaleString("en-NZ"):"",
+      o.start_datetime?new Date(o.start_datetime).toLocaleString("en-NZ",{timeZone:NZ_TZ}):"",
+      o.end_datetime?new Date(o.end_datetime).toLocaleString("en-NZ",{timeZone:NZ_TZ}):"",
       o.end_datetime?getDur(o.start_datetime,o.end_datetime):"",
       o.status,o.remarks||""
     ].map(v=>`"${String(v??"").replace(/"/g,'""')}"`));
@@ -359,7 +357,7 @@ function ProductionScheduler({user,onLogout}){
   // ── Today stats ──
   const td=today();
   // Convert UTC timestamp to local date string for comparison
-  const toLocalDate=dt=>{if(!dt)return"";const d=new Date(dt);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
+  const toLocalDate=dt=>{if(!dt)return"";return new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});};
   // Helper: is this order assigned to the current user?
   const isMine=o=>(o.employees||[o.employee]).includes(user.full_name);
   // Active orders
@@ -650,8 +648,8 @@ function ProductionScheduler({user,onLogout}){
 // ══════════════════════════════════════════════════════════════
 function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,reload}){
   const overallEffAvg=(()=>{const e=orders.filter(o=>o.status==="Completed"&&o.efficiency!=null).map(o=>o.efficiency);return e.length?Math.round(e.reduce((a,b)=>a+b)/e.length):null;})();
-  const td=(()=>{const d=new Date();return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;})();
-  const toLocalDate=dt=>{if(!dt)return"";const d=new Date(dt);return`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
+  const td=new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+  const toLocalDate=dt=>{if(!dt)return"";return new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});};
   let todayManMins=0;
   activeOrders.forEach(o=>{if(!o.is_paused)todayManMins+=(Date.now()-new Date(o.start_datetime)-((o.break_minutes||0)*60000))/60000;else todayManMins+=minsTo(o.start_datetime,o.paused_at||nowISO())-(o.break_minutes||0);});
   orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime)===td).forEach(o=>{todayManMins+=o.working_minutes||o.actual_minutes||0;});
@@ -1016,7 +1014,7 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
           {planPreview&&(
             <div className="card au" style={{marginBottom:14,borderColor:"#00D4AA44"}}>
               <div style={{fontSize:12,color:"#00D4AA",fontWeight:700,marginBottom:10}}>✔ Preview: {planPreview.length} orders ready to import</div>
-              {planPreview.slice(0,4).map((r,i)=><div key={i} style={{fontSize:11,color:"#8B90A8",marginBottom:3}}>• {r.order_number} | {r.item_id} | {r.line_id} | Qty:{r.production_qty} | {r.scheduled_datetime?new Date(r.scheduled_datetime).toLocaleString("en-NZ"):""}</div>)}
+              {planPreview.slice(0,4).map((r,i)=><div key={i} style={{fontSize:11,color:"#8B90A8",marginBottom:3}}>• {r.order_number} | {r.item_id} | {r.line_id} | Qty:{r.production_qty} | {r.scheduled_datetime?new Date(r.scheduled_datetime).toLocaleString("en-NZ",{timeZone:NZ_TZ}):""}</div>)}
               {planPreview.length>4&&<div style={{fontSize:11,color:"#4A4F65"}}>…and {planPreview.length-4} more</div>}
               <div style={{display:"flex",gap:10,marginTop:12}}>
                 <button className="bp" onClick={applyPlanned} disabled={saving} style={{flex:1}}>{saving?"Importing…":"➕ Import All"}</button>
