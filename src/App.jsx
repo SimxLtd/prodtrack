@@ -323,9 +323,8 @@ function ProductionScheduler({user,onLogout}){
       const em=fEmp==="All"||o.employee===fEmp||(o.employees&&o.employees.includes(fEmp));
       const lm=fLine==="All"||o.line_id===fLine;
       const sm=fStatus==="All"||o.status===fStatus;
-      const orderDate=toLocalDate(o.start_datetime);
-      const df=!fFrom||orderDate>=fFrom;
-      const dt=!fTo||orderDate<=fTo;
+      const df=!fFrom||new Date(o.start_datetime)>=new Date(fFrom);
+      const dt=!fTo||new Date(o.start_datetime)<=new Date(fTo+"T23:59:59");
       return em&&lm&&sm&&df&&dt;
     })
     .sort((a,b)=>{
