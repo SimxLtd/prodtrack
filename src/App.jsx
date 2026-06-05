@@ -198,7 +198,7 @@ function ProductionScheduler({user,onLogout}){
   const [cm,setCm]=useState(null); const [cf,setCf]=useState({endQty:"",remarks:""});
   // records
   const [fEmp,setFEmp]=useState("All"); const [fLine,setFLine]=useState("All"); const [fStatus,setFStatus]=useState("All");
-  const [fFrom,setFFrom]=useState(""); const [fTo,setFTo]=useState("");
+  const [fFrom,setFFrom]=useState(()=>new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"})); const [fTo,setFTo]=useState(()=>new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"}));
   const [sortF,setSortF]=useState("created_at"); const [sortD,setSortD]=useState("desc");
 
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
@@ -344,7 +344,7 @@ function ProductionScheduler({user,onLogout}){
       items.find(i=>i.id===o.item_id)?.std_minutes??"",
       o.production_qty,o.end_qty??"",
       o.actual_minutes??"",o.break_minutes??"",o.working_minutes??"",
-      o.working_minutes?((o.working_minutes/60).toFixed(2)):"",
+      o.working_minutes?(((o.working_minutes*(o.num_employees||1))/60).toFixed(2)):"",
       o.efficiency??"",
       o.start_datetime?new Date(o.start_datetime).toLocaleString("en-NZ",{timeZone:NZ_TZ}):"",
       o.end_datetime?new Date(o.end_datetime).toLocaleString("en-NZ",{timeZone:NZ_TZ}):"",
@@ -520,9 +520,21 @@ function ProductionScheduler({user,onLogout}){
                   <div><label>Employee</label><select value={fEmp} onChange={e=>setFEmp(e.target.value)}><option value="All">All</option>{employees.map(e=><option key={e} value={e}>{e}</option>)}</select></div>
                   <div><label>Line</label><select value={fLine} onChange={e=>setFLine(e.target.value)}><option value="All">All</option>{lines.map(l=><option key={l.id} value={l.id}>{l.id}</option>)}</select></div>
                   <div><label>Status</label><select value={fStatus} onChange={e=>setFStatus(e.target.value)}><option value="All">All</option><option>In Progress</option><option>Completed</option></select></div>
-                  <div><label>From</label><input type="date" value={fFrom} onChange={e=>setFFrom(e.target.value)}/></div>
-                  <div><label>To</label><input type="date" value={fTo} onChange={e=>setFTo(e.target.value)}/></div>
-                  <div style={{display:"flex",alignItems:"flex-end"}}><button className="bg" style={{width:"100%",fontSize:11}} onClick={()=>{setFEmp("All");setFLine("All");setFStatus("All");setFFrom("");setFTo("");setSortF("created_at");setSortD("desc");}}>✕ Clear</button></div>
+                  <div>
+                    <label>Date Range</label>
+                    <div style={{display:"flex",gap:6,alignItems:"center"}}>
+                      <input type="date" value={fFrom} onChange={e=>setFFrom(e.target.value)} style={{flex:1}}/>
+                      <span style={{color:"#5A5F78",fontSize:10,flexShrink:0}}>→</span>
+                      <input type="date" value={fTo} onChange={e=>setFTo(e.target.value)} style={{flex:1}}/>
+                      <button className="bg" style={{whiteSpace:"nowrap",fontSize:10,padding:"8px 10px",flexShrink:0,
+                        ...(fFrom===new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"})&&fTo===new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"})
+                          ?{borderColor:"#00D4AA",color:"#00D4AA",background:"rgba(0,212,170,.07)"}:{})}}
+                        onClick={()=>{const t=new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"});setFFrom(t);setFTo(t);}}>
+                        Today
+                      </button>
+                    </div>
+                  </div>
+                  <div style={{display:"flex",alignItems:"flex-end"}}><button className="bg" style={{width:"100%",fontSize:11}} onClick={()=>{const t=new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"});setFEmp("All");setFLine("All");setFStatus("All");setFFrom("");setFTo("");setSortF("created_at");setSortD("desc");}}>✕ Clear All</button></div>
                 </div>
               </div>
               {filteredOrders.length===0
@@ -546,7 +558,7 @@ function ProductionScheduler({user,onLogout}){
                           const dur=o.end_datetime?getDur(o.start_datetime,o.end_datetime):"—";
                           const eff=o.efficiency; const ec=effColor(eff);
                           const stdMin=items.find(i=>i.id===o.item_id)?.std_minutes;
-                          const manHrs=o.working_minutes?(o.working_minutes/60).toFixed(2):o.actual_minutes?(o.actual_minutes/60).toFixed(2):null;
+                          const numEmpO=o.num_employees||1; const manHrs=o.working_minutes?((o.working_minutes*numEmpO)/60).toFixed(2):o.actual_minutes?((o.actual_minutes*numEmpO)/60).toFixed(2):null;
                           return(
                             <tr key={o.id} style={{borderBottom:"1px solid #1E2135"}}>
                               <td style={{padding:"8px 10px",color:"#00D4AA",fontWeight:600,whiteSpace:"nowrap"}}>{o.order_number}</td>
@@ -653,8 +665,8 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
   const td=new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});
   const toLocalDate=dt=>{if(!dt)return"";return new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});};
   let todayManMins=0;
-  activeOrders.forEach(o=>{if(!o.is_paused)todayManMins+=(Date.now()-new Date(o.start_datetime)-((o.break_minutes||0)*60000))/60000;else todayManMins+=minsTo(o.start_datetime,o.paused_at||nowISO())-(o.break_minutes||0);});
-  orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime)===td).forEach(o=>{todayManMins+=o.working_minutes||o.actual_minutes||0;});
+  activeOrders.forEach(o=>{const numE=o.num_employees||1;if(!o.is_paused)todayManMins+=((Date.now()-new Date(o.start_datetime)-((o.break_minutes||0)*60000))/60000)*numE;else todayManMins+=(minsTo(o.start_datetime,o.paused_at||nowISO())-(o.break_minutes||0))*numE;});
+  orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime)===td).forEach(o=>{todayManMins+=(o.working_minutes||o.actual_minutes||0)*(o.num_employees||1);});
   const todayManHrs=(todayManMins/60).toFixed(1);
 
   // Man hours by line (today)
@@ -664,8 +676,8 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
     mhByLine[o.line_id].mins+=mins;
     (o.employees||[o.employee]).forEach(e=>{if(!mhByLine[o.line_id].emps.includes(e))mhByLine[o.line_id].emps.push(e);});
   };
-  activeOrders.forEach(o=>{const m=o.is_paused?minsTo(o.start_datetime,o.paused_at||nowISO())-(o.break_minutes||0):((Date.now()-new Date(o.start_datetime))/60000)-(o.break_minutes||0);addToLine(o,Math.max(m,0));});
-  orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime)===td).forEach(o=>addToLine(o,o.working_minutes||o.actual_minutes||0));
+  activeOrders.forEach(o=>{const m=o.is_paused?minsTo(o.start_datetime,o.paused_at||nowISO())-(o.break_minutes||0):((Date.now()-new Date(o.start_datetime))/60000)-(o.break_minutes||0); addToLine(o,Math.max(m,0)*(o.num_employees||1));});
+  orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime)===td).forEach(o=>addToLine(o,(o.working_minutes||o.actual_minutes||0)*(o.num_employees||1)));
   const mhArr=Object.values(mhByLine).sort((a,b)=>b.mins-a.mins);
   const maxMins=Math.max(...mhArr.map(l=>l.mins),1);
 
