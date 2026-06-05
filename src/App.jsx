@@ -516,25 +516,35 @@ function ProductionScheduler({user,onLogout}){
                   <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>Records <span style={{color:"#4A4F65"}}>({filteredOrders.length})</span></h2>
                   <div style={{display:"flex",gap:8}}><button className="bg" style={{fontSize:11}} onClick={loadAll}>↻</button><button className="bp" style={{fontSize:12,padding:"8px 16px"}} onClick={exportCSV}>⬇ Export CSV</button></div>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10}}>
-                  <div><label>Employee</label><select value={fEmp} onChange={e=>setFEmp(e.target.value)}><option value="All">All</option>{employees.map(e=><option key={e} value={e}>{e}</option>)}</select></div>
-                  <div><label>Line</label><select value={fLine} onChange={e=>setFLine(e.target.value)}><option value="All">All</option>{lines.map(l=><option key={l.id} value={l.id}>{l.id}</option>)}</select></div>
-                  <div><label>Status</label><select value={fStatus} onChange={e=>setFStatus(e.target.value)}><option value="All">All</option><option>In Progress</option><option>Completed</option></select></div>
-                  <div>
+                <div style={{display:"flex",alignItems:"flex-end",gap:10,flexWrap:"wrap"}}>
+                  <div style={{flex:"0 0 150px"}}>
+                    <label>Employee</label>
+                    <select value={fEmp} onChange={e=>setFEmp(e.target.value)}><option value="All">All</option>{employees.map(e=><option key={e} value={e}>{e}</option>)}</select>
+                  </div>
+                  <div style={{flex:"0 0 140px"}}>
+                    <label>Line</label>
+                    <select value={fLine} onChange={e=>setFLine(e.target.value)}><option value="All">All</option>{lines.map(l=><option key={l.id} value={l.id}>{l.id}</option>)}</select>
+                  </div>
+                  <div style={{flex:"0 0 140px"}}>
+                    <label>Status</label>
+                    <select value={fStatus} onChange={e=>setFStatus(e.target.value)}><option value="All">All</option><option>In Progress</option><option>Completed</option></select>
+                  </div>
+                  <div style={{flex:"1 1 320px",minWidth:280}}>
                     <label>Date Range</label>
                     <div style={{display:"flex",gap:6,alignItems:"center"}}>
-                      <input type="date" value={fFrom} onChange={e=>setFFrom(e.target.value)} style={{flex:1}}/>
+                      <input type="date" value={fFrom} onChange={e=>setFFrom(e.target.value)} style={{flex:1,minWidth:0}}/>
                       <span style={{color:"#5A5F78",fontSize:10,flexShrink:0}}>→</span>
-                      <input type="date" value={fTo} onChange={e=>setFTo(e.target.value)} style={{flex:1}}/>
-                      <button className="bg" style={{whiteSpace:"nowrap",fontSize:10,padding:"8px 10px",flexShrink:0,
-                        ...(fFrom===new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"})&&fTo===new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"})
-                          ?{borderColor:"#00D4AA",color:"#00D4AA",background:"rgba(0,212,170,.07)"}:{})}}
-                        onClick={()=>{const t=new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"});setFFrom(t);setFTo(t);}}>
-                        Today
-                      </button>
+                      <input type="date" value={fTo} onChange={e=>setFTo(e.target.value)} style={{flex:1,minWidth:0}}/>
                     </div>
                   </div>
-                  <div style={{display:"flex",alignItems:"flex-end"}}><button className="bg" style={{width:"100%",fontSize:11}} onClick={()=>{const t=new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"});setFEmp("All");setFLine("All");setFStatus("All");setFFrom("");setFTo("");setSortF("created_at");setSortD("desc");}}>✕ Clear All</button></div>
+                  <div style={{display:"flex",gap:8,flexShrink:0,paddingBottom:1}}>
+                    {(()=>{const t=new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"});const isToday=fFrom===t&&fTo===t;return(
+                      <button className="bg" style={{whiteSpace:"nowrap",fontSize:11,padding:"9px 14px",...(isToday?{borderColor:"#00D4AA",color:"#00D4AA",background:"rgba(0,212,170,.07)"}:{})}}
+                        onClick={()=>{setFFrom(t);setFTo(t);}}>Today</button>
+                    );})()}
+                    <button className="bg" style={{whiteSpace:"nowrap",fontSize:11,padding:"9px 14px"}}
+                      onClick={()=>{setFEmp("All");setFLine("All");setFStatus("All");setFFrom("");setFTo("");setSortF("created_at");setSortD("desc");}}>✕ Clear All</button>
+                  </div>
                 </div>
               </div>
               {filteredOrders.length===0
