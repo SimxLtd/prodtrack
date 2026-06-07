@@ -491,20 +491,24 @@ function ProductionScheduler({user,onLogout}){
 
           {/* ═══ SEARCH ═══ */}
           {view==="search"&&(
-            <div className="au" style={{maxWidth:700}}>
-              <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase",marginBottom:20}}>Search Order</h2>
-              <div className="card" style={{marginBottom:16}}>
+            <div className="au" style={{maxWidth:900}}>
+              {/* ── Order Search ── */}
+              <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Search Order</h2>
+              <div className="card" style={{marginBottom:8}}>
                 <div style={{display:"flex",gap:10}}>
                   <input placeholder="Enter Order Number…" value={sq} onChange={e=>setSq(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&(async()=>{if(!sq.trim())return;const r=await db.searchOrder(sq.trim());r.length?(setSr(r[0]),setSnf(false)):(setSr(null),setSnf(true));})()}/>
                   <button className="bp" onClick={async()=>{if(!sq.trim())return;const r=await db.searchOrder(sq.trim());r.length?(setSr(r[0]),setSnf(false)):(setSr(null),setSnf(true));}} style={{whiteSpace:"nowrap"}}>🔍 Search</button>
                 </div>
               </div>
-              {snf&&<div className="card" style={{textAlign:"center",color:"#FF4B6E",padding:32}}><div style={{fontSize:32,marginBottom:8}}>🚫</div><div>No order found for <strong>"{sq}"</strong></div></div>}
-              {sr&&(
-                <div className="au">
-                  <OrderCard order={sr} item={items.find(i=>i.id===sr.item_id)} onClose={sr.status==="In Progress"&&!sr.is_paused?()=>openClose(sr):null} onPause={sr.status==="In Progress"&&!sr.is_paused?()=>handlePause(sr):null} onResume={sr.is_paused?()=>handleResume(sr):null}/>
-                </div>
-              )}
+              <div style={{fontSize:10,color:"#5A5F78",marginBottom:16,paddingLeft:2}}>Type an order number and press Search to view full order details, time tracking and break log.</div>
+              {snf&&<div className="card" style={{textAlign:"center",color:"#FF4B6E",padding:32,marginBottom:16}}><div style={{fontSize:32,marginBottom:8}}>🚫</div><div>No order found for <strong>"{sq}"</strong></div></div>}
+              {sr&&<div className="au" style={{marginBottom:16}}><OrderCard order={sr} item={items.find(i=>i.id===sr.item_id)} onClose={sr.status==="In Progress"&&!sr.is_paused?()=>openClose(sr):null} onPause={sr.status==="In Progress"&&!sr.is_paused?()=>handlePause(sr):null} onResume={sr.is_paused?()=>handleResume(sr):null}/></div>}
+
+              {/* ── Divider ── */}
+              <div style={{height:1,background:"#2A2F45",margin:"8px 0 22px"}}/>
+
+              {/* ── Monthly Efficiency Tracker ── */}
+              <MonthlyTracker orders={orders} items={items}/>
             </div>
           )}
 
@@ -1218,6 +1222,265 @@ function UserRow({u,onToggle,onResetPw}){
           <input type="password" placeholder="New password" value={pw} onChange={e=>setPw(e.target.value)} style={{flex:1,fontSize:12,padding:"7px 12px"}}/>
           <button className="bw" style={{fontSize:11,padding:"7px 12px"}} onClick={()=>{onResetPw(pw);setPw("");setShow(false);}}>Save</button>
           <button className="bg" style={{fontSize:11,padding:"7px 10px"}} onClick={()=>setShow(false)}>✕</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ══════════════════════════════════════════════════════════════
+//  MONTHLY EFFICIENCY TRACKER
+// ══════════════════════════════════════════════════════════════
+function MonthlyTracker({orders,items}){
+  const nowNZ   = new Date();
+  const curNZDate = nowNZ.toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+  const curNZYear  = Number(curNZDate.slice(0,4));
+  const curNZMonth = Number(curNZDate.slice(5,7))-1; // 0-indexed
+
+  const [selYear,setSelYear]   = useState(curNZYear);
+  const [selMonth,setSelMonth] = useState(curNZMonth);
+  const [chartView,setChartView] = useState("chart");
+  const chartRef=useRef(null); const barRef=useRef(null);
+  const effInst=useRef(null); const barInst=useRef(null);
+  const [chartReady,setChartReady] = useState(false);
+
+  const toNZ = dt => !dt?"":new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+  const todayStr = curNZDate;
+  const isCurrentMonth = selYear===curNZYear && selMonth===curNZMonth;
+
+  const prevMonth=()=>{ if(selMonth===0){setSelMonth(11);setSelYear(y=>y-1);}else setSelMonth(m=>m-1); };
+  const nextMonth=()=>{
+    const isLast=selYear===curNZYear&&selMonth===curNZMonth;
+    if(isLast) return; // can't go to future months
+    if(selMonth===11){setSelMonth(0);setSelYear(y=>y+1);}else setSelMonth(m=>m+1);
+  };
+  const goCurrentMonth=()=>{ setSelYear(curNZYear); setSelMonth(curNZMonth); };
+
+  const monthStr=String(selMonth+1).padStart(2,"0");
+  const daysInMonth=new Date(selYear,selMonth+1,0).getDate();
+  const monthName=new Date(selYear,selMonth,1).toLocaleDateString("en-NZ",{month:"long",year:"numeric"});
+
+  // Build daily data
+  const dayData=[];
+  for(let d=1;d<=daysInMonth;d++){
+    const dateStr=`${selYear}-${monthStr}-${String(d).padStart(2,"0")}`;
+    const isFuture=dateStr>todayStr;
+    const label=`${String(d).padStart(2,"0")} ${new Date(dateStr+"T12:00:00").toLocaleDateString("en-NZ",{month:"short"})}`;
+    const dayName=new Date(dateStr+"T12:00:00").toLocaleDateString("en-NZ",{weekday:"short"});
+    if(isFuture){ dayData.push({dateStr,label,dayName,completed:0,pieces:0,avgEff:null,avgWorkMin:null,manHrs:null,hasData:false,isFuture:true}); continue; }
+    const dayOrders=orders.filter(o=>o.status==="Completed"&&toNZ(o.start_datetime)===dateStr);
+    if(dayOrders.length===0){ dayData.push({dateStr,label,dayName,completed:0,pieces:0,avgEff:null,avgWorkMin:null,manHrs:null,hasData:false,isFuture:false}); continue; }
+    const effs=dayOrders.filter(o=>o.efficiency!=null).map(o=>o.efficiency);
+    const avgEff=effs.length?Math.round(effs.reduce((a,b)=>a+b)/effs.length):null;
+    const totalManMins=dayOrders.reduce((a,o)=>a+(o.working_minutes||o.actual_minutes||0)*(o.num_employees||1),0);
+    const avgWorkMin=Math.round(dayOrders.reduce((a,o)=>a+(o.working_minutes||o.actual_minutes||0),0)/dayOrders.length);
+    const pieces=dayOrders.reduce((a,o)=>a+(o.end_qty||0),0);
+    dayData.push({dateStr,label,dayName,completed:dayOrders.length,pieces,avgEff,avgWorkMin,manHrs:Number((totalManMins/60).toFixed(2)),hasData:true,isFuture:false});
+  }
+
+  const dataOnly=dayData.filter(d=>d.hasData);
+  const monthAvgEff=dataOnly.filter(d=>d.avgEff!=null).length
+    ?Math.round(dataOnly.filter(d=>d.avgEff!=null).reduce((a,d)=>a+d.avgEff,0)/dataOnly.filter(d=>d.avgEff!=null).length):null;
+  const bestDay=[...dataOnly].filter(d=>d.avgEff!=null).sort((a,b)=>b.avgEff-a.avgEff)[0];
+  const worstDay=[...dataOnly].filter(d=>d.avgEff!=null).sort((a,b)=>a.avgEff-b.avgEff)[0];
+  const totalCompleted=dataOnly.reduce((a,d)=>a+d.completed,0);
+  const totalPieces=dataOnly.reduce((a,d)=>a+d.pieces,0);
+
+  // Load Chart.js
+  useEffect(()=>{
+    if(window.Chart){setChartReady(true);return;}
+    if(!document.getElementById("chartjs-cdn")){
+      const s=document.createElement("script");
+      s.id="chartjs-cdn";
+      s.src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js";
+      document.head.appendChild(s);
+    }
+    const poll=setInterval(()=>{if(window.Chart){setChartReady(true);clearInterval(poll);}},150);
+    return()=>clearInterval(poll);
+  },[]);
+
+  // Render charts whenever data or view changes
+  useEffect(()=>{
+    if(!chartReady||chartView!=="chart") return;
+    const past=dayData.filter(d=>!d.isFuture);
+    const labels=past.map(d=>d.label);
+    const effVals=past.map(d=>d.avgEff);
+    const ordVals=past.map(d=>d.completed);
+    const pcsVals=past.map(d=>d.pieces);
+    const gridC="rgba(255,255,255,0.07)"; const txtC="#8B90A8";
+
+    if(effInst.current){effInst.current.destroy();effInst.current=null;}
+    if(barInst.current){barInst.current.destroy();barInst.current=null;}
+
+    if(chartRef.current){
+      effInst.current=new window.Chart(chartRef.current,{
+        type:"line",
+        data:{labels,datasets:[
+          {label:"Efficiency %",data:effVals,borderColor:"#378ADD",backgroundColor:"rgba(55,138,221,0.07)",fill:true,tension:0.35,borderWidth:2,
+           pointBackgroundColor:effVals.map(v=>v==null?"transparent":v>=100?"#00D4AA":v>=80?"#FFC107":"#FF4B6E"),
+           pointBorderColor:"#1A1D27",pointBorderWidth:2,pointRadius:effVals.map(v=>v==null?0:5),spanGaps:false},
+          {label:"Target",data:Array(labels.length).fill(100),borderColor:"#FF4B6E",borderWidth:1.5,borderDash:[5,4],pointRadius:0,fill:false},
+        ]},
+        options:{responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.datasetIndex===0?(c.parsed.y!=null?` Eff: ${c.parsed.y}%`:` No data`):` Target: 100%`}}},
+          scales:{
+            x:{grid:{color:gridC},ticks:{color:txtC,font:{size:10},autoSkip:labels.length>15,maxRotation:45}},
+            y:{min:0,max:130,grid:{color:gridC},ticks:{color:txtC,font:{size:10},callback:v=>v+"%"}}
+          }}
+      });
+    }
+    if(barRef.current){
+      barInst.current=new window.Chart(barRef.current,{
+        type:"bar",
+        data:{labels,datasets:[
+          {label:"Orders",data:ordVals,backgroundColor:"rgba(0,212,170,0.6)",borderColor:"#00D4AA",borderWidth:1.5,borderRadius:3,yAxisID:"y"},
+          {label:"Pieces",data:pcsVals,backgroundColor:"rgba(255,149,0,0.55)",borderColor:"#FF9500",borderWidth:1.5,borderRadius:3,yAxisID:"y1"},
+        ]},
+        options:{responsive:true,maintainAspectRatio:false,
+          plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.datasetIndex===0?` ${c.parsed.y} orders`:` ${c.parsed.y} pieces`}}},
+          scales:{
+            x:{grid:{display:false},ticks:{color:txtC,font:{size:10},autoSkip:labels.length>15,maxRotation:45}},
+            y:{position:"left",grid:{color:gridC},ticks:{color:"#00D4AA",font:{size:10}},title:{display:true,text:"Orders",color:"#00D4AA",font:{size:10}}},
+            y1:{position:"right",grid:{display:false},ticks:{color:"#FF9500",font:{size:10}},title:{display:true,text:"Pieces",color:"#FF9500",font:{size:10}}},
+          }}
+      });
+    }
+    return()=>{
+      if(effInst.current){effInst.current.destroy();effInst.current=null;}
+      if(barInst.current){barInst.current.destroy();barInst.current=null;}
+    };
+  },[chartReady,chartView,selYear,selMonth,orders]);
+
+  return(
+    <div>
+      {/* Header row */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>Monthly Efficiency Tracker</div>
+          <div style={{fontSize:10,color:"#5A5F78",marginTop:2}}>{monthName} — daily efficiency %, orders & pieces</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          {/* Month nav */}
+          <div style={{display:"flex",alignItems:"center",background:"#1A1D27",border:"1px solid #2A2F45",borderRadius:6,overflow:"hidden"}}>
+            <button onClick={prevMonth} style={{background:"none",border:"none",color:"#8B90A8",fontSize:16,padding:"6px 12px",cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace"}}
+              onMouseEnter={e=>{e.currentTarget.style.color="#00D4AA";e.currentTarget.style.background="rgba(0,212,170,.07)";}}
+              onMouseLeave={e=>{e.currentTarget.style.color="#8B90A8";e.currentTarget.style.background="none";}}>‹</button>
+            <div style={{fontSize:11,color:"#E8EAF0",padding:"6px 14px",fontWeight:700,minWidth:130,textAlign:"center",borderLeft:"1px solid #2A2F45",borderRight:"1px solid #2A2F45"}}>{monthName}</div>
+            <button onClick={nextMonth} disabled={isCurrentMonth}
+              style={{background:"none",border:"none",color:isCurrentMonth?"#3A3F55":"#8B90A8",fontSize:16,padding:"6px 12px",cursor:isCurrentMonth?"not-allowed":"pointer",fontFamily:"'IBM Plex Mono',monospace"}}
+              onMouseEnter={e=>{if(!isCurrentMonth){e.currentTarget.style.color="#00D4AA";e.currentTarget.style.background="rgba(0,212,170,.07)";}}}
+              onMouseLeave={e=>{e.currentTarget.style.color=isCurrentMonth?"#3A3F55":"#8B90A8";e.currentTarget.style.background="none";}}>›</button>
+          </div>
+          {!isCurrentMonth&&(
+            <button onClick={goCurrentMonth} style={{background:"rgba(0,212,170,.1)",border:"1px solid rgba(0,212,170,.25)",color:"#00D4AA",fontSize:10,padding:"6px 12px",borderRadius:4,cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,whiteSpace:"nowrap"}}>
+              Current Month
+            </button>
+          )}
+          {/* View toggle — radio style */}
+          <div style={{display:"flex",background:"#13161F",border:"1px solid #2A2F45",borderRadius:6,overflow:"hidden"}}>
+            {[["chart","📊 Chart"],["table","📋 Table"]].map(([v,lbl],i)=>(
+              <button key={v} onClick={()=>setChartView(v)} style={{
+                background:chartView===v?"rgba(0,212,170,.12)":"none",
+                border:"none",borderRight:i===0?"1px solid #2A2F45":"none",
+                fontFamily:"'IBM Plex Mono',monospace",fontSize:11,padding:"6px 16px",cursor:"pointer",
+                color:chartView===v?"#00D4AA":"#8B90A8",fontWeight:chartView===v?700:400,
+                transition:"all .15s",whiteSpace:"nowrap",
+              }}>{lbl}</button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* KPI Cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:16}}>
+        {[
+          {lbl:"Month Avg Eff",   val:monthAvgEff!=null?monthAvgEff+"%":"—",   color:effColor(monthAvgEff), sub:`${dataOnly.length} days with data`},
+          {lbl:"Best Day",        val:bestDay?bestDay.avgEff+"%":"—",           color:"#00D4AA",             sub:bestDay?`${bestDay.label} · ${bestDay.completed} orders`:"—"},
+          {lbl:"Lowest Day",      val:worstDay?worstDay.avgEff+"%":"—",         color:worstDay&&worstDay.avgEff<80?"#FF4B6E":"#FFC107", sub:worstDay?`${worstDay.label} · ${worstDay.completed} orders`:"—"},
+          {lbl:"Total Completed", val:`${totalCompleted} orders`,               color:"#C8CADC",             sub:`${totalPieces.toLocaleString()} pieces this month`},
+        ].map(s=>(
+          <div key={s.lbl} style={{background:"#13161F",borderRadius:6,padding:"10px 12px"}}>
+            <div style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>{s.lbl}</div>
+            <div style={{fontSize:17,fontWeight:700,color:s.color,lineHeight:1}}>{s.val}</div>
+            <div style={{fontSize:9,color:"#5A5F78",marginTop:3}}>{s.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── CHART VIEW ── */}
+      {chartView==="chart"&&(
+        <div>
+          <div style={{display:"flex",gap:16,marginBottom:10,flexWrap:"wrap"}}>
+            {[
+              {color:"#378ADD",label:"Efficiency %",  shape:"square"},
+              {color:"#00D4AA",label:"Orders",         shape:"square"},
+              {color:"#FF9500",label:"Pieces",         shape:"square"},
+              {color:"#FF4B6E",label:"100% target",    shape:"line"},
+            ].map(l=>(
+              <div key={l.label} style={{display:"flex",alignItems:"center",gap:5,fontSize:11,color:"#8B90A8"}}>
+                {l.shape==="line"
+                  ?<div style={{width:18,height:2,background:l.color}}/>
+                  :<div style={{width:10,height:10,borderRadius:2,background:l.color,flexShrink:0}}/>}
+                {l.label}
+              </div>
+            ))}
+          </div>
+          {!chartReady
+            ?<div style={{height:220,display:"flex",alignItems:"center",justifyContent:"center",color:"#5A5F78",fontSize:12}}>Loading chart…</div>
+            :<>
+              <div style={{position:"relative",width:"100%",height:210,marginBottom:14}}>
+                <canvas ref={chartRef} role="img" aria-label={`Line chart of daily efficiency for ${monthName}`}/>
+              </div>
+              <div style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase",marginBottom:8}}>Orders completed & pieces per day</div>
+              <div style={{position:"relative",width:"100%",height:150}}>
+                <canvas ref={barRef} role="img" aria-label={`Bar chart of completed orders and pieces per day for ${monthName}`}/>
+              </div>
+            </>
+          }
+        </div>
+      )}
+
+      {/* ── TABLE VIEW ── */}
+      {chartView==="table"&&(
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+            <thead>
+              <tr style={{borderBottom:"1px solid #2A2F45"}}>
+                {["Date","Day","Orders","Pieces","Avg Eff","Avg Work Min","Man Hrs","vs Prev"].map(h=>(
+                  <th key={h} style={{padding:"8px 10px",textAlign:"left",color:"#5A5F78",fontSize:10,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {dayData.filter(d=>!d.isFuture).map((d,i,arr)=>{
+                const isToday=d.dateStr===todayStr;
+                const prev=arr[i-1];
+                const trend=d.hasData&&prev?.hasData&&d.avgEff!=null&&prev?.avgEff!=null?d.avgEff-prev.avgEff:null;
+                const ec=effColor(d.avgEff);
+                return(
+                  <tr key={d.dateStr} style={{borderBottom:"1px solid #1E2135",background:isToday?"rgba(55,138,221,.07)":"transparent"}}
+                    onMouseEnter={e=>e.currentTarget.style.background=isToday?"rgba(55,138,221,.1)":"#1A1F30"}
+                    onMouseLeave={e=>e.currentTarget.style.background=isToday?"rgba(55,138,221,.07)":"transparent"}>
+                    <td style={{padding:"8px 10px",color:"#00D4AA",fontWeight:isToday?700:400}}>{d.label}{isToday?" ★":""}</td>
+                    <td style={{padding:"8px 10px",color:"#5A5F78"}}>{d.dayName}</td>
+                    <td style={{padding:"8px 10px",textAlign:"center",color:d.completed>0?"#C8CADC":"#4A4F65"}}>{d.completed||"—"}</td>
+                    <td style={{padding:"8px 10px",textAlign:"center",color:d.pieces>0?"#FF9500":"#4A4F65"}}>{d.pieces>0?d.pieces.toLocaleString():"—"}</td>
+                    <td style={{padding:"8px 10px"}}>
+                      {d.avgEff!=null
+                        ?<span style={{fontSize:11,fontWeight:700,color:ec,background:ec+"22",padding:"2px 8px",borderRadius:12,border:`1px solid ${ec}44`}}>{d.avgEff}%</span>
+                        :<span style={{color:"#4A4F65"}}>—</span>}
+                    </td>
+                    <td style={{padding:"8px 10px",textAlign:"center",color:"#C8CADC"}}>{d.avgWorkMin??<span style={{color:"#4A4F65"}}>—</span>}</td>
+                    <td style={{padding:"8px 10px",textAlign:"center",color:"#FF9500"}}>{d.manHrs&&d.manHrs>0?d.manHrs+"h":<span style={{color:"#4A4F65"}}>—</span>}</td>
+                    <td style={{padding:"8px 10px",color:trend==null?"#4A4F65":trend>0?"#00D4AA":trend<0?"#FF4B6E":"#8B90A8"}}>
+                      {trend==null?"—":trend>0?`↑ +${Math.round(trend)}%`:trend<0?`↓ ${Math.round(trend)}%`:"→ 0%"}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
