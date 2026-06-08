@@ -1300,14 +1300,23 @@ function MonthlyTracker({orders,items}){
     return()=>clearInterval(poll);
   },[]);
 
-  // Render charts whenever data or view changes
+  // Render charts — only days with activity, dynamic Y-axis
   useEffect(()=>{
     if(!chartReady||chartView!=="chart") return;
-    const past=dayData.filter(d=>!d.isFuture);
-    const labels=past.map(d=>d.label);
-    const effVals=past.map(d=>d.avgEff);
-    const ordVals=past.map(d=>d.completed);
-    const pcsVals=past.map(d=>d.pieces);
+
+    // ── Fix 1: filter to only days that have completed orders ──
+    const activeDays=dayData.filter(d=>!d.isFuture&&d.hasData);
+    if(activeDays.length===0) return;
+
+    const labels  = activeDays.map(d=>d.label);
+    const effVals = activeDays.map(d=>d.avgEff);
+    const ordVals = activeDays.map(d=>d.completed);
+    const pcsVals = activeDays.map(d=>d.pieces);
+
+    // ── Fix 2: dynamic Y-axis max = highest eff + 15% headroom ──
+    const maxEff = Math.max(...effVals.filter(v=>v!=null), 100);
+    const yMax   = Math.ceil((maxEff + 15) / 10) * 10; // round up to nearest 10
+
     const gridC="rgba(255,255,255,0.07)"; const txtC="#8B90A8";
 
     if(effInst.current){effInst.current.destroy();effInst.current=null;}
@@ -1317,17 +1326,40 @@ function MonthlyTracker({orders,items}){
       effInst.current=new window.Chart(chartRef.current,{
         type:"line",
         data:{labels,datasets:[
-          {label:"Efficiency %",data:effVals,borderColor:"#378ADD",backgroundColor:"rgba(55,138,221,0.07)",fill:true,tension:0.35,borderWidth:2,
-           pointBackgroundColor:effVals.map(v=>v==null?"transparent":v>=100?"#00D4AA":v>=80?"#FFC107":"#FF4B6E"),
-           pointBorderColor:"#1A1D27",pointBorderWidth:2,pointRadius:effVals.map(v=>v==null?0:5),spanGaps:false},
-          {label:"Target",data:Array(labels.length).fill(100),borderColor:"#FF4B6E",borderWidth:1.5,borderDash:[5,4],pointRadius:0,fill:false},
+          {
+            label:"Efficiency %",
+            data:effVals,
+            borderColor:"#378ADD",
+            backgroundColor:"rgba(55,138,221,0.07)",
+            fill:true,tension:0.35,borderWidth:2,
+            // ── Fix 3: no nulls — all active days have data ──
+            pointBackgroundColor:effVals.map(v=>v>=100?"#00D4AA":v>=80?"#FFC107":"#FF4B6E"),
+            pointBorderColor:"#1A1D27",pointBorderWidth:2,pointRadius:5,
+            spanGaps:true,
+          },
+          {
+            label:"Target",
+            data:Array(labels.length).fill(100),
+            borderColor:"#FF4B6E",borderWidth:1.5,borderDash:[5,4],
+            pointRadius:0,fill:false,
+          },
         ]},
-        options:{responsive:true,maintainAspectRatio:false,
-          plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.datasetIndex===0?(c.parsed.y!=null?` Eff: ${c.parsed.y}%`:` No data`):` Target: 100%`}}},
+        options:{
+          responsive:true,maintainAspectRatio:false,
+          plugins:{
+            legend:{display:false},
+            tooltip:{callbacks:{label:c=>c.datasetIndex===0?` Eff: ${c.parsed.y}%`:` Target: 100%`}}
+          },
           scales:{
             x:{grid:{color:gridC},ticks:{color:txtC,font:{size:10},autoSkip:labels.length>15,maxRotation:45}},
-            y:{min:0,max:130,grid:{color:gridC},ticks:{color:txtC,font:{size:10},callback:v=>v+"%"}}
-          }}
+            y:{
+              min:0,
+              max:yMax,   // ← dynamic
+              grid:{color:gridC},
+              ticks:{color:txtC,font:{size:10},callback:v=>v+"%",stepSize:yMax<=150?10:20}
+            }
+          }
+        }
       });
     }
     if(barRef.current){
@@ -1337,13 +1369,15 @@ function MonthlyTracker({orders,items}){
           {label:"Orders",data:ordVals,backgroundColor:"rgba(0,212,170,0.6)",borderColor:"#00D4AA",borderWidth:1.5,borderRadius:3,yAxisID:"y"},
           {label:"Pieces",data:pcsVals,backgroundColor:"rgba(255,149,0,0.55)",borderColor:"#FF9500",borderWidth:1.5,borderRadius:3,yAxisID:"y1"},
         ]},
-        options:{responsive:true,maintainAspectRatio:false,
+        options:{
+          responsive:true,maintainAspectRatio:false,
           plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>c.datasetIndex===0?` ${c.parsed.y} orders`:` ${c.parsed.y} pieces`}}},
           scales:{
             x:{grid:{display:false},ticks:{color:txtC,font:{size:10},autoSkip:labels.length>15,maxRotation:45}},
             y:{position:"left",grid:{color:gridC},ticks:{color:"#00D4AA",font:{size:10}},title:{display:true,text:"Orders",color:"#00D4AA",font:{size:10}}},
             y1:{position:"right",grid:{display:false},ticks:{color:"#FF9500",font:{size:10}},title:{display:true,text:"Pieces",color:"#FF9500",font:{size:10}}},
-          }}
+          }
+        }
       });
     }
     return()=>{
