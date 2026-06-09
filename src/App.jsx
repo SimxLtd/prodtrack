@@ -84,7 +84,21 @@ function parsePlannedCSV(text){
     const sched_raw         =cols[4]?.replace(/^"|"$/g,"").trim();
     if(!order_number){skipped++;return;}
     let scheduled_datetime=null;
-    if(sched_raw){try{const d=new Date(sched_raw);if(!isNaN(d.getTime()))scheduled_datetime=d.toISOString();}catch{}}
+    if(sched_raw){
+      try{
+        let iso=sched_raw;
+        // Detect D/MM/YYYY or DD/MM/YYYY (NZ/AU format) — e.g. "9/06/2026 8:00" or "25/06/2026 8:00:00 AM"
+        const nzMatch=sched_raw.match(/^(\d{1,2})\/(\d{2})\/(\d{4})(.*)$/);
+        if(nzMatch){
+          const [,day,mon,yr,rest]=nzMatch;
+          // rest may be " 8:00", " 8:00:00", " 8:00:00 AM" etc
+          const timePart=rest.trim();
+          iso=`${yr}-${mon}-${day.padStart(2,"0")}${timePart?" "+timePart:""}`;
+        }
+        const d=new Date(iso);
+        if(!isNaN(d.getTime()))scheduled_datetime=d.toISOString();
+      }catch{}
+    }
     rows.push({order_number,item_id,line_id,production_qty:production_qty_raw?Number(production_qty_raw):null,scheduled_datetime});
   });
   return{rows,skipped,errors};
