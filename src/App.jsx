@@ -8,7 +8,12 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const sbH = () => ({ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`, "Content-Type":"application/json", Prefer:"return=representation" });
 const sb = async (path, opts={}) => {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers:{...sbH(),...(opts.headers||{})}, ...opts });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) {
+    const errText = await res.text();
+    let errMsg = errText;
+    try{ const j=JSON.parse(errText); errMsg=j.message||j.hint||j.details||errText; }catch{}
+    throw new Error(errMsg);
+  }
   const t = await res.text(); return t ? JSON.parse(t) : [];
 };
 const sbAll = async (table, query="") => {
@@ -1019,39 +1024,60 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
   const handlePlannedFile=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=(ev)=>{const res=parsePlannedCSV(ev.target.result);setPlanPreview(res.rows);setPlanSkipped(res.skipped||0);setPlanErrors(res.errors||[]);};r.readAsText(f);e.target.value="";};
   const applyPlanned=async()=>{
     if(!planPreview) return; setSaving(true);
-    let added=0, updated=0, protected_=0;
+    let added=0, updated=0, protected_=0, failed=0;
+    const failedRows=[];
     for(const row of planPreview){
       try{
         const item=items.find(i=>i.id===row.item_id);
         const line=lines.find(l=>l.id===row.line_id);
-        const payload={...row,item_name:item?.name||"",line_name:line?.name||"",uploaded_by:user.username};
+        // Build payload — only include non-null scheduled_datetime
+        const payload={
+          order_number:row.order_number,
+          item_id:row.item_id||null,
+          item_name:item?.name||"",
+          line_id:row.line_id||null,
+          line_name:line?.name||"",
+          production_qty:row.production_qty||null,
+          uploaded_by:user.username,
+          status:"pending",
+        };
+        // Only add scheduled_datetime if it parsed correctly
+        if(row.scheduled_datetime) payload.scheduled_datetime=row.scheduled_datetime;
+
         // Check if already exists
         const existing=await db.findPlanned(row.order_number);
         if(existing.length>0){
           const ex=existing[0];
-          // Protect orders already started or completed
           if(ex.status==="started"||ex.status==="completed"){ protected_++; continue; }
-          // Update pending orders
-          await db.updatePlanned(ex.id,{
-            item_id:row.item_id, item_name:item?.name||"",
-            line_id:row.line_id, line_name:line?.name||"",
-            production_qty:row.production_qty,
-            scheduled_datetime:row.scheduled_datetime,
+          const updatePayload={
+            item_id:payload.item_id, item_name:payload.item_name,
+            line_id:payload.line_id, line_name:payload.line_name,
+            production_qty:payload.production_qty,
             uploaded_by:user.username,
-          });
+          };
+          if(row.scheduled_datetime) updatePayload.scheduled_datetime=row.scheduled_datetime;
+          await db.updatePlanned(ex.id, updatePayload);
           updated++;
         } else {
           await db.addPlanned(payload);
           added++;
         }
-      }catch(e){ console.error("Import row error:",e); }
+      }catch(e){
+        failed++;
+        failedRows.push(`${row.order_number}: ${e.message}`);
+        console.error("Import row error:",row.order_number, e.message);
+      }
     }
     const fresh=await db.getAllPlanned(); setPlanned(fresh); setPlanPreview(null);
     const parts=[];
-    if(added)     parts.push(`${added} imported`);
-    if(updated)   parts.push(`${updated} updated`);
+    if(added)      parts.push(`${added} imported`);
+    if(updated)    parts.push(`${updated} updated`);
     if(protected_) parts.push(`${protected_} skipped (in progress/completed)`);
-    showToast(parts.length?parts.join(" · "):"Nothing to import.");
+    if(failed)     parts.push(`${failed} failed`);
+    const msg=parts.length?parts.join(" · "):"Nothing to import.";
+    showToast(msg, failed>0?"warn":"success");
+    // Show first error detail if any failed
+    if(failedRows.length>0) setTimeout(()=>showToast("Error: "+failedRows[0],"error"),3600);
     setSaving(false);
   };
   const delPlanned=async id=>{ try{ await db.deletePlanned(id); setPlanned(p=>p.filter(x=>x.id!==id)); showToast("Removed."); }catch{showToast("Failed.","error");} };
