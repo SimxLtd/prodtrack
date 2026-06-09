@@ -1038,7 +1038,6 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
           line_id:row.line_id||null,
           line_name:line?.name||"",
           production_qty:row.production_qty||null,
-          uploaded_by:user.username,
           status:"pending",
         };
         // Only add scheduled_datetime if it parsed correctly
@@ -1053,7 +1052,6 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
             item_id:payload.item_id, item_name:payload.item_name,
             line_id:payload.line_id, line_name:payload.line_name,
             production_qty:payload.production_qty,
-            uploaded_by:user.username,
           };
           if(row.scheduled_datetime) updatePayload.scheduled_datetime=row.scheduled_datetime;
           await db.updatePlanned(ex.id, updatePayload);
