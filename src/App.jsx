@@ -60,15 +60,36 @@ const STATUS_COLORS = { "In Progress":{dot:"#FFC107",bg:"#FFF3CD33"}, "On Break"
 
 // ─── CSV HELPERS ───────────────────────────────────────────────
 function parsePlannedCSV(text){
-  const lines=text.trim().split(/\r?\n/).slice(1); const rows=[]; const errors=[];
-  lines.forEach((line,i)=>{
-    const c=line.split(",").map(s=>s.trim().replace(/^"|"$/g,""));
-    const [order_number,item_id,line_id,production_qty,scheduled_datetime]=c;
-    if(!order_number){errors.push(`Row ${i+2}: missing order_number`);return;}
-    rows.push({order_number,item_id:item_id||null,line_id:line_id||null,production_qty:production_qty?Number(production_qty):null,scheduled_datetime:scheduled_datetime?new Date(scheduled_datetime).toISOString():null});
+  // Strip BOM, normalise line endings
+  const raw=text.replace(/^\uFEFF/,"").replace(/\r\n/g,"\n").replace(/\r/g,"\n");
+  const allLines=raw.split("\n");
+  // Always skip first row (header), process all remaining rows
+  const dataLines=allLines.slice(1);
+  const rows=[]; let skipped=0; const errors=[];
+  dataLines.forEach((line)=>{
+    // Skip blank lines
+    if(!line.trim()||!line.replace(/,/g,"").trim()){skipped++;return;}
+    // Parse respecting quoted fields
+    const cols=[]; let cur=""; let inQ=false;
+    for(const ch of line){
+      if(ch==='"'){inQ=!inQ;}
+      else if(ch===","&&!inQ){cols.push(cur.trim());cur="";}
+      else cur+=ch;
+    }
+    cols.push(cur.trim());
+    const order_number      =cols[0]?.replace(/^"|"$/g,"").trim();
+    const item_id           =cols[1]?.replace(/^"|"$/g,"").trim()||null;
+    const line_id           =cols[2]?.replace(/^"|"$/g,"").trim()||null;
+    const production_qty_raw=cols[3]?.replace(/^"|"$/g,"").trim();
+    const sched_raw         =cols[4]?.replace(/^"|"$/g,"").trim();
+    if(!order_number){skipped++;return;}
+    let scheduled_datetime=null;
+    if(sched_raw){try{const d=new Date(sched_raw);if(!isNaN(d.getTime()))scheduled_datetime=d.toISOString();}catch{}}
+    rows.push({order_number,item_id,line_id,production_qty:production_qty_raw?Number(production_qty_raw):null,scheduled_datetime});
   });
-  return {rows,errors};
+  return{rows,skipped,errors};
 }
+
 const PLANNED_TEMPLATE=`order_number,item_id,line_id,production_qty,scheduled_datetime\nORD-2025-201,ITM-001,LINE-01,100,2026-06-02 08:00\nORD-2025-202,ITM-002,LINE-04,200,2026-06-02 09:30`;
 function dlPlannedTemplate(){ const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([PLANNED_TEMPLATE],{type:"text/csv"})); a.download="planned_orders_template.csv"; a.click(); }
 
@@ -935,7 +956,7 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
   const itemFileRef=useRef(); const plannedFileRef=useRef();
   // planned orders
   const [planned,setPlanned]=useState([]); const [loadingP,setLoadingP]=useState(true);
-  const [planPreview,setPlanPreview]=useState(null); const [planErrors,setPlanErrors]=useState([]);
+  const [planPreview,setPlanPreview]=useState(null); const [planSkipped,setPlanSkipped]=useState(0); const [planErrors,setPlanErrors]=useState([]);
 
   useEffect(()=>{
     db.getUsers().then(u=>{setUsers(u);setLoadingU(false);}).catch(()=>setLoadingU(false));
@@ -981,20 +1002,42 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
   const delLine=async id=>{ try{ await db.deleteLine(id); setLines(p=>p.filter(l=>l.id!==id)); showToast("Removed."); }catch{showToast("Failed.","error");} };
 
   // Planned orders
-  const handlePlannedFile=e=>{ const f=e.target.files[0]; if(!f)return; const r=new FileReader(); r.onload=ev=>{ const res=parsePlannedCSV(ev.target.result); setPlanPreview(res.rows); setPlanErrors(res.errors); }; r.readAsText(f); e.target.value=""; };
+  const handlePlannedFile=e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();r.onload=(ev)=>{const res=parsePlannedCSV(ev.target.result);setPlanPreview(res.rows);setPlanSkipped(res.skipped||0);setPlanErrors(res.errors||[]);};r.readAsText(f);e.target.value="";};
   const applyPlanned=async()=>{
     if(!planPreview) return; setSaving(true);
-    let added=0,skipped=0;
+    let added=0, updated=0, protected_=0;
     for(const row of planPreview){
       try{
         const item=items.find(i=>i.id===row.item_id);
         const line=lines.find(l=>l.id===row.line_id);
-        await db.addPlanned({...row,item_name:item?.name||"",line_name:line?.name||"",uploaded_by:user.username});
-        added++;
-      }catch{ skipped++; }
+        const payload={...row,item_name:item?.name||"",line_name:line?.name||"",uploaded_by:user.username};
+        // Check if already exists
+        const existing=await db.findPlanned(row.order_number);
+        if(existing.length>0){
+          const ex=existing[0];
+          // Protect orders already started or completed
+          if(ex.status==="started"||ex.status==="completed"){ protected_++; continue; }
+          // Update pending orders
+          await db.updatePlanned(ex.id,{
+            item_id:row.item_id, item_name:item?.name||"",
+            line_id:row.line_id, line_name:line?.name||"",
+            production_qty:row.production_qty,
+            scheduled_datetime:row.scheduled_datetime,
+            uploaded_by:user.username,
+          });
+          updated++;
+        } else {
+          await db.addPlanned(payload);
+          added++;
+        }
+      }catch(e){ console.error("Import row error:",e); }
     }
     const fresh=await db.getAllPlanned(); setPlanned(fresh); setPlanPreview(null);
-    showToast(`Imported ${added} orders.${skipped?` ${skipped} skipped (duplicates).`:""}`);
+    const parts=[];
+    if(added)     parts.push(`${added} imported`);
+    if(updated)   parts.push(`${updated} updated`);
+    if(protected_) parts.push(`${protected_} skipped (in progress/completed)`);
+    showToast(parts.length?parts.join(" · "):"Nothing to import.");
     setSaving(false);
   };
   const delPlanned=async id=>{ try{ await db.deletePlanned(id); setPlanned(p=>p.filter(x=>x.id!==id)); showToast("Removed."); }catch{showToast("Failed.","error");} };
@@ -1037,16 +1080,21 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
             </div>
           </div>
 
-          {planErrors.length>0&&<div className="card" style={{marginBottom:12,borderColor:"#FF4B6E44"}}>{planErrors.map((e,i)=><div key={i} style={{fontSize:11,color:"#FF9090",marginBottom:3}}>• {e}</div>)}</div>}
-
           {planPreview&&(
             <div className="card au" style={{marginBottom:14,borderColor:"#00D4AA44"}}>
-              <div style={{fontSize:12,color:"#00D4AA",fontWeight:700,marginBottom:10}}>✔ Preview: {planPreview.length} orders ready to import</div>
-              {planPreview.slice(0,4).map((r,i)=><div key={i} style={{fontSize:11,color:"#8B90A8",marginBottom:3}}>• {r.order_number} | {r.item_id} | {r.line_id} | Qty:{r.production_qty} | {r.scheduled_datetime?new Date(r.scheduled_datetime).toLocaleString("en-NZ",{timeZone:NZ_TZ}):""}</div>)}
-              {planPreview.length>4&&<div style={{fontSize:11,color:"#4A4F65"}}>…and {planPreview.length-4} more</div>}
+              <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12,flexWrap:"wrap"}}>
+                <div style={{fontSize:12,color:"#00D4AA",fontWeight:700}}>✔ Preview: {planPreview.length} orders ready</div>
+                {planSkipped>0&&<div style={{fontSize:11,color:"#FF9500"}}>⚠ {planSkipped} blank/empty rows skipped</div>}
+              </div>
+              {planPreview.slice(0,4).map((r,i)=>(
+                <div key={i} style={{fontSize:11,color:"#8B90A8",marginBottom:3}}>
+                  • <span style={{color:"#00D4AA"}}>{r.order_number}</span> | {r.item_id||"—"} | {r.line_id||"—"} | Qty:{r.production_qty||"—"} | {r.scheduled_datetime?new Date(r.scheduled_datetime).toLocaleString("en-NZ",{timeZone:NZ_TZ}):"—"}
+                </div>
+              ))}
+              {planPreview.length>4&&<div style={{fontSize:11,color:"#4A4F65",marginBottom:8}}>…and {planPreview.length-4} more</div>}
               <div style={{display:"flex",gap:10,marginTop:12}}>
                 <button className="bp" onClick={applyPlanned} disabled={saving} style={{flex:1}}>{saving?"Importing…":"➕ Import All"}</button>
-                <button className="bg" onClick={()=>setPlanPreview(null)}>Cancel</button>
+                <button className="bg" onClick={()=>{setPlanPreview(null);setPlanSkipped(0);}}>Cancel</button>
               </div>
             </div>
           )}
