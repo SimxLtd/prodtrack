@@ -61,6 +61,19 @@ const getElap = s => { const ms=Date.now()-new Date(s); return `${Math.floor(ms/
 const fmtMins = m => { if(!m&&m!==0) return "—"; return `${Math.floor(m/60)}h ${Math.round(m%60)}m`; };
 const calcEff = (std,qty,workMins,numEmp=1) => std&&qty&&workMins&&workMins>0 ? Math.round((std*qty/(workMins*(numEmp||1)))*100) : null;
 const effColor= e => !e?"#8B90A8":e>=100?"#00D4AA":e>=80?"#FFC107":e>=60?"#FF9500":"#FF4B6E";
+// ── Smart line matcher — handles 01→LINE-01, LINE-01→LINE-01, name match etc ──
+function findLine(lines, csvLineId){
+  if(!csvLineId) return null;
+  const v=csvLineId.trim();
+  return(
+    lines.find(l=>l.id===v) ||
+    lines.find(l=>l.id.endsWith("-"+v)) ||
+    lines.find(l=>v.endsWith("-"+l.id)) ||
+    lines.find(l=>l.id.includes(v)||v.includes(l.id)) ||
+    lines.find(l=>l.name.toLowerCase().includes(v.toLowerCase()))
+  );
+}
+
 const STATUS_COLORS = { "In Progress":{dot:"#FFC107",bg:"#FFF3CD33"}, "On Break":{dot:"#FF9500",bg:"rgba(255,149,0,.08)"}, Completed:{dot:"#198754",bg:"#D1E7DD33"} };
 
 // ─── CSV HELPERS ───────────────────────────────────────────────
@@ -267,8 +280,14 @@ function ProductionScheduler({user,onLogout}){
       const r=await db.findPlanned(orderSearchQ.trim().toUpperCase());
       if(r.length){
         const p=r[0];
-        const sdt=p.scheduled_datetime?new Date(new Date(p.scheduled_datetime)-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16):"";
-        setNf(f=>({...f,orderNumber:p.order_number,itemId:p.item_id||"",lineId:p.line_id||"",productionQty:p.production_qty?String(p.production_qty):"",startDateTime:sdt,autoFilled:true}));
+        // Fix: correct NZ timezone for datetime picker (no double-offset)
+        const sdt=p.scheduled_datetime
+          ?new Date(p.scheduled_datetime).toLocaleString("sv",{timeZone:NZ_TZ}).slice(0,16).replace(" ","T")
+          :"";
+        // Fix: smart line matching — handles 01→LINE-01, LINE-01→LINE-01, name match etc
+        const matchedLine=findLine(lines, p.line_id);
+        const resolvedLineId=matchedLine?matchedLine.id:(p.line_id||"");
+        setNf(f=>({...f,orderNumber:p.order_number,itemId:p.item_id||"",lineId:resolvedLineId,productionQty:p.production_qty?String(p.production_qty):"",startDateTime:sdt,autoFilled:true}));
         showToast("Order found — fields auto-filled!");
       } else {
         setNf(f=>({...f,orderNumber:orderSearchQ.trim().toUpperCase(),autoFilled:false}));
@@ -975,7 +994,7 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
   const itemFileRef=useRef(); const plannedFileRef=useRef();
   // planned orders
   const [planned,setPlanned]=useState([]); const [loadingP,setLoadingP]=useState(true);
-  const [planPreview,setPlanPreview]=useState(null); const [planSkipped,setPlanSkipped]=useState(0); const [planErrors,setPlanErrors]=useState([]);
+  const [planPreview,setPlanPreview]=useState(null); const [planSkipped,setPlanSkipped]=useState(0); const [planErrors,setPlanErrors]=useState([]); const [planView,setPlanView]=useState("today");
 
   useEffect(()=>{
     db.getUsers().then(u=>{setUsers(u);setLoadingU(false);}).catch(()=>setLoadingU(false));
@@ -1031,12 +1050,16 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
         const item=items.find(i=>i.id===row.item_id);
         const line=lines.find(l=>l.id===row.line_id);
         // Build payload — only include non-null scheduled_datetime
+        // Smart line matching — resolve CSV line_id to actual line in pt_lines
+        const matchedLine=findLine(lines,row.line_id);
+        const resolvedLineId=matchedLine?matchedLine.id:(row.line_id||null);
+        const resolvedLineName=matchedLine?matchedLine.name:(line?.name||"");
         const payload={
           order_number:row.order_number,
           item_id:row.item_id||null,
           item_name:item?.name||"",
-          line_id:row.line_id||null,
-          line_name:line?.name||"",
+          line_id:resolvedLineId,
+          line_name:resolvedLineName,
           production_qty:row.production_qty||null,
           status:"pending",
         };
@@ -1050,7 +1073,7 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
           if(ex.status==="started"||ex.status==="completed"){ protected_++; continue; }
           const updatePayload={
             item_id:payload.item_id, item_name:payload.item_name,
-            line_id:payload.line_id, line_name:payload.line_name,
+            line_id:resolvedLineId, line_name:resolvedLineName,
             production_qty:payload.production_qty,
           };
           if(row.scheduled_datetime) updatePayload.scheduled_datetime=row.scheduled_datetime;
@@ -1138,27 +1161,55 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
           )}
 
           <div className="card" style={{padding:"12px 0"}}>
-            <div style={{fontSize:11,color:"#FF9500",letterSpacing:1,textTransform:"uppercase",padding:"0 16px",marginBottom:10}}>All Planned Orders ({planned.length})</div>
-            {loadingP?<div style={{padding:"12px 16px",color:"#4A4F65"}}>Loading…</div>:(
-              <div style={{maxHeight:440,overflowY:"auto"}}>
-                <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
-                  <thead><tr style={{borderBottom:"1px solid #2A2F45"}}>{["Order #","Item","Line","Qty","Scheduled","Status",""].map(h=><th key={h} style={{padding:"8px 14px",textAlign:"left",color:"#5A5F78",fontSize:10,letterSpacing:1,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
-                  <tbody>
-                    {planned.map(p=>(
-                      <tr key={p.id} style={{borderBottom:"1px solid #1E2135"}} onMouseEnter={e=>e.currentTarget.style.background="#1E2135"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
-                        <td style={{padding:"8px 14px",color:"#00D4AA",fontWeight:700}}>{p.order_number}</td>
-                        <td style={{padding:"8px 14px",color:"#8B90A8"}}><div style={{fontSize:10,color:"#5A5F78"}}>{p.item_id}</div><div>{p.item_name}</div></td>
-                        <td style={{padding:"8px 14px",color:"#7B8CFF"}}>{p.line_id}</td>
-                        <td style={{padding:"8px 14px",textAlign:"center"}}>{p.production_qty??"—"}</td>
-                        <td style={{padding:"8px 14px",color:"#8B90A8",fontSize:11}}>{p.scheduled_datetime?fmt(p.scheduled_datetime):"—"}</td>
-                        <td style={{padding:"8px 14px"}}><span style={{fontSize:10,fontWeight:700,color:statusColor[p.status]||"#8B90A8",background:statusColor[p.status]+"22",padding:"2px 9px",borderRadius:12,border:`1px solid ${statusColor[p.status]||"#8B90A8"}44`}}>{p.status}</span></td>
-                        <td style={{padding:"8px 14px"}}>{p.status==="pending"&&<button className="pdel" onClick={()=>delPlanned(p.id)}>✕</button>}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",marginBottom:12,flexWrap:"wrap",gap:8}}>
+              <div style={{fontSize:11,color:"#FF9500",letterSpacing:1,textTransform:"uppercase"}}>
+                {planView==="today"
+                  ?`Today's Orders (${planned.filter(p=>{const d=new Date(p.scheduled_datetime||p.created_at);return d.toLocaleDateString("en-CA",{timeZone:NZ_TZ})===new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});}).length} of ${planned.length})`
+                  :`All Planned Orders (${planned.length})`}
               </div>
-            )}
+              <div style={{display:"flex",background:"#13161F",border:"1px solid #2A2F45",borderRadius:6,overflow:"hidden"}}>
+                {[["today","📅 Today"],["all","All"]].map(([v,lbl])=>(
+                  <button key={v} onClick={()=>setPlanView(v)} style={{
+                    background:planView===v?"rgba(0,212,170,.1)":"none",
+                    border:"none",borderRight:v==="today"?"1px solid #2A2F45":"none",
+                    fontFamily:"'IBM Plex Mono',monospace",fontSize:11,padding:"5px 14px",cursor:"pointer",
+                    color:planView===v?"#00D4AA":"#8B90A8",fontWeight:planView===v?700:400,
+                    whiteSpace:"nowrap",
+                  }}>{lbl}</button>
+                ))}
+              </div>
+            </div>
+            {loadingP?<div style={{padding:"12px 16px",color:"#4A4F65"}}>Loading…</div>:(()=>{
+              const todayNZ=new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+              const displayed=planView==="today"
+                ?planned.filter(p=>p.scheduled_datetime&&new Date(p.scheduled_datetime).toLocaleDateString("en-CA",{timeZone:NZ_TZ})===todayNZ)
+                :planned;
+              return(
+                <div style={{maxHeight:440,overflowY:"auto"}}>
+                  {displayed.length===0
+                    ?<div style={{padding:"24px 16px",textAlign:"center",color:"#4A4F65",fontSize:12}}>
+                        {planView==="today"?"No planned orders for today.":"No planned orders uploaded yet."}
+                      </div>
+                    :<table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                      <thead><tr style={{borderBottom:"1px solid #2A2F45"}}>{["Order #","Item","Line","Qty","Scheduled","Status",""].map(h=><th key={h} style={{padding:"8px 14px",textAlign:"left",color:"#5A5F78",fontSize:10,letterSpacing:1,textTransform:"uppercase"}}>{h}</th>)}</tr></thead>
+                      <tbody>
+                        {displayed.map(p=>(
+                          <tr key={p.id} style={{borderBottom:"1px solid #1E2135"}} onMouseEnter={e=>e.currentTarget.style.background="#1E2135"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                            <td style={{padding:"8px 14px",color:"#00D4AA",fontWeight:700}}>{p.order_number}</td>
+                            <td style={{padding:"8px 14px",color:"#8B90A8"}}><div style={{fontSize:10,color:"#5A5F78"}}>{p.item_id}</div><div>{p.item_name}</div></td>
+                            <td style={{padding:"8px 14px",color:"#7B8CFF"}}>{p.line_id}</td>
+                            <td style={{padding:"8px 14px",textAlign:"center"}}>{p.production_qty??"—"}</td>
+                            <td style={{padding:"8px 14px",color:"#8B90A8",fontSize:11}}>{p.scheduled_datetime?fmt(p.scheduled_datetime):"—"}</td>
+                            <td style={{padding:"8px 14px"}}><span style={{fontSize:10,fontWeight:700,color:statusColor[p.status]||"#8B90A8",background:(statusColor[p.status]||"#8B90A8")+"22",padding:"2px 9px",borderRadius:12,border:`1px solid ${(statusColor[p.status]||"#8B90A8")}44`}}>{p.status}</span></td>
+                            <td style={{padding:"8px 14px"}}>{p.status==="pending"&&<button className="pdel" onClick={()=>delPlanned(p.id)}>✕</button>}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  }
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
