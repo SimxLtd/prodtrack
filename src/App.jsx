@@ -1402,93 +1402,141 @@ function UserRow({u,onToggle,onResetPw}){
 
 
 // ══════════════════════════════════════════════════════════════
-//  BARCODE SCANNER (camera + USB/BT)
+//  BARCODE SCANNER — native BarcodeDetector API + canvas fallback
 // ══════════════════════════════════════════════════════════════
 function BarcodeScanner({onDetected}){
-  const videoRef=useRef(null);
-  const streamRef=useRef(null);
-  const rafRef=useRef(null);
-  const [error,setError]=useState(null);
-  const [lib,setLib]=useState(false);
+  const videoRef   = useRef(null);
+  const canvasRef  = useRef(null);
+  const streamRef  = useRef(null);
+  const rafRef     = useRef(null);
+  const detectorRef= useRef(null);
+  const [status,setStatus] = useState("starting"); // starting|active|error
+  const [error,setError]   = useState(null);
 
-  // Load ZXing barcode library
   useEffect(()=>{
-    if(window.ZXing){setLib(true);return;}
-    if(!document.getElementById("zxing-cdn")){
-      const s=document.createElement("script");
-      s.id="zxing-cdn";
-      s.src="https://cdnjs.cloudflare.com/ajax/libs/zxing-js/0.18.6/index.min.js";
-      document.head.appendChild(s);
-    }
-    const poll=setInterval(()=>{if(window.ZXing){setLib(true);clearInterval(poll);}},200);
-    return()=>clearInterval(poll);
-  },[]);
-
-  // Start camera when lib ready
-  useEffect(()=>{
-    if(!lib) return;
     let stopped=false;
+
+    const tick=async()=>{
+      if(stopped||!videoRef.current||!canvasRef.current||!detectorRef.current) return;
+      const v=videoRef.current;
+      if(v.readyState<2){ rafRef.current=requestAnimationFrame(tick); return; }
+      const ctx=canvasRef.current.getContext("2d");
+      canvasRef.current.width=v.videoWidth;
+      canvasRef.current.height=v.videoHeight;
+      ctx.drawImage(v,0,0);
+      try{
+        const results=await detectorRef.current.detect(canvasRef.current);
+        if(results.length>0&&!stopped){
+          onDetected(results[0].rawValue);
+          return; // stop scanning after first hit
+        }
+      }catch{}
+      if(!stopped) rafRef.current=requestAnimationFrame(tick);
+    };
+
     const start=async()=>{
       try{
-        const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}});
+        // ── Strategy 1: native BarcodeDetector (Chrome 88+, Safari 17+, iPad OS 17+)
+        if("BarcodeDetector" in window){
+          detectorRef.current=new window.BarcodeDetector({
+            formats:["code_128","code_39","ean_13","ean_8","qr_code","data_matrix","upc_a","upc_e","itf","codabar"],
+          });
+        } else {
+          // ── Strategy 2: polyfill via CDN for older browsers
+          if(!window._bdPolyfill){
+            await new Promise((res,rej)=>{
+              const s=document.createElement("script");
+              s.src="https://cdn.jsdelivr.net/npm/barcode-detector@2/dist/es/barcode_detector.min.js";
+              s.onload=()=>{window._bdPolyfill=true;res();};
+              s.onerror=rej;
+              document.head.appendChild(s);
+            });
+          }
+          if("BarcodeDetector" in window){
+            detectorRef.current=new window.BarcodeDetector({formats:["code_128","code_39","ean_13","qr_code"]});
+          } else {
+            setError("Barcode detection not supported on this browser. Please use USB scanner or type manually.");
+            return;
+          }
+        }
+
+        // Request camera — prefer rear camera (environment) on mobile
+        const stream=await navigator.mediaDevices.getUserMedia({
+          video:{facingMode:{ideal:"environment"},width:{ideal:1920},height:{ideal:1080}}
+        });
         if(stopped){stream.getTracks().forEach(t=>t.stop());return;}
         streamRef.current=stream;
         if(videoRef.current){
           videoRef.current.srcObject=stream;
-          videoRef.current.play();
+          await videoRef.current.play();
         }
-        // Use ZXing to decode
-        const hints=new Map();
-        const codeReader=new window.ZXing.BrowserMultiFormatReader(hints);
-        codeReader.decodeFromVideoDevice(null,videoRef.current,(result,err)=>{
-          if(result&&!stopped){
-            onDetected(result.getText());
-            codeReader.reset();
-          }
-        }).catch(e=>setError("Camera error: "+e.message));
+        setStatus("active");
+        rafRef.current=requestAnimationFrame(tick);
       }catch(e){
-        setError(e.name==="NotAllowedError"?"Camera permission denied. Please allow camera access in your browser.":"Camera unavailable: "+e.message);
+        if(e.name==="NotAllowedError"){
+          setError("Camera permission denied.
+
+On iPad: go to Settings → Safari → Camera → Allow.");
+        } else if(e.name==="NotFoundError"||e.name==="DevicesNotFoundError"){
+          setError("No camera found on this device.");
+        } else {
+          setError("Camera error: "+e.message);
+        }
       }
     };
+
     start();
     return()=>{
       stopped=true;
       if(streamRef.current) streamRef.current.getTracks().forEach(t=>t.stop());
       if(rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  },[lib]);
+  },[]);
 
   return(
     <div style={{background:"#0F1117",border:"1px solid rgba(123,140,255,.3)",borderRadius:7,overflow:"hidden",marginTop:10}}>
+      {/* Header */}
       <div style={{background:"#13161F",padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #2A2F45"}}>
         <div style={{display:"flex",alignItems:"center",gap:7}}>
-          <span style={{width:7,height:7,borderRadius:"50%",background:"#7B8CFF",display:"inline-block",animation:"pulse 1s infinite"}}></span>
-          <span style={{fontSize:11,color:"#7B8CFF",fontWeight:700}}>Camera active — point at barcode or QR code</span>
+          <span style={{width:7,height:7,borderRadius:"50%",background:status==="active"?"#00D4AA":"#7B8CFF",display:"inline-block",animation:"pulse 1s infinite"}}></span>
+          <span style={{fontSize:11,color:status==="active"?"#00D4AA":"#7B8CFF",fontWeight:700}}>
+            {status==="starting"?"Starting camera…":"Point camera at barcode or QR code"}
+          </span>
         </div>
         <span style={{fontSize:9,color:"#5A5F78"}}>CODE128 · QR · EAN · CODE39</span>
       </div>
+
+      {/* Body */}
       {error?(
-        <div style={{padding:"20px 16px",textAlign:"center",color:"#FF4B6E",fontSize:12}}>
-          ⚠ {error}<br/>
-          <span style={{fontSize:10,color:"#5A5F78",marginTop:6,display:"block"}}>Use USB/Bluetooth scanner instead: click the order number field then scan.</span>
+        <div style={{padding:"20px 16px",textAlign:"center",color:"#FF4B6E",fontSize:12,lineHeight:1.7}}>
+          ⚠ {error.split("
+").map((l,i)=><span key={i}>{l}<br/></span>)}
+          <div style={{fontSize:10,color:"#5A5F78",marginTop:8}}>
+            USB/Bluetooth scanner works without camera — just click the order number field and scan.
+          </div>
         </div>
       ):(
-        <div style={{position:"relative",background:"#000",height:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
-          {!lib&&<div style={{color:"#5A5F78",fontSize:11}}>Loading scanner…</div>}
-          <video ref={videoRef} style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover"}} muted playsInline/>
-          {/* Scan frame overlay */}
-          <div style={{position:"absolute",width:200,height:100,border:"1.5px solid #7B8CFF",borderRadius:5,pointerEvents:"none"}}>
-            <div style={{position:"absolute",width:12,height:12,top:"-2px",left:"-2px",borderColor:"#00D4AA",borderStyle:"solid",borderWidth:"3px 0 0 3px"}}/>
-            <div style={{position:"absolute",width:12,height:12,top:"-2px",right:"-2px",borderColor:"#00D4AA",borderStyle:"solid",borderWidth:"3px 3px 0 0"}}/>
-            <div style={{position:"absolute",width:12,height:12,bottom:"-2px",left:"-2px",borderColor:"#00D4AA",borderStyle:"solid",borderWidth:"0 0 3px 3px"}}/>
-            <div style={{position:"absolute",width:12,height:12,bottom:"-2px",right:"-2px",borderColor:"#00D4AA",borderStyle:"solid",borderWidth:"0 3px 3px 0"}}/>
-            <div style={{position:"absolute",width:"100%",height:2,background:"linear-gradient(to right,transparent,#00D4AA,transparent)",animation:"scan 1.5s ease-in-out infinite"}}></div>
-          </div>
-          <div style={{position:"absolute",bottom:6,fontSize:9,color:"rgba(255,255,255,.4)"}}>Hold steady — auto-captures on detect</div>
+        <div style={{position:"relative",background:"#000",height:220,display:"flex",alignItems:"center",justifyContent:"center",overflow:"hidden"}}>
+          {status==="starting"&&(
+            <div style={{color:"#5A5F78",fontSize:11,position:"absolute",zIndex:2}}>Starting camera…</div>
+          )}
+          <video ref={videoRef} style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover"}} muted playsInline autoPlay/>
+          <canvas ref={canvasRef} style={{display:"none"}}/>
+          {/* Scan frame */}
+          {status==="active"&&(
+            <div style={{position:"absolute",width:220,height:110,border:"1.5px solid #7B8CFF",borderRadius:5,pointerEvents:"none"}}>
+              <div style={{position:"absolute",width:14,height:14,top:"-2px",left:"-2px",borderColor:"#00D4AA",borderStyle:"solid",borderWidth:"3px 0 0 3px"}}/>
+              <div style={{position:"absolute",width:14,height:14,top:"-2px",right:"-2px",borderColor:"#00D4AA",borderStyle:"solid",borderWidth:"3px 3px 0 0"}}/>
+              <div style={{position:"absolute",width:14,height:14,bottom:"-2px",left:"-2px",borderColor:"#00D4AA",borderStyle:"solid",borderWidth:"0 0 3px 3px"}}/>
+              <div style={{position:"absolute",width:14,height:14,bottom:"-2px",right:"-2px",borderColor:"#00D4AA",borderStyle:"solid",borderWidth:"0 3px 3px 0"}}/>
+              <div style={{position:"absolute",width:"100%",height:2,background:"linear-gradient(to right,transparent,#00D4AA,transparent)",animation:"scan 1.5s ease-in-out infinite"}}></div>
+            </div>
+          )}
+          <div style={{position:"absolute",bottom:6,fontSize:9,color:"rgba(255,255,255,.45)"}}>Hold steady — auto-captures on detect</div>
         </div>
       )}
       <div style={{textAlign:"center",padding:"7px",fontSize:10,color:"#5A5F78",background:"#13161F"}}>
-        No camera? Type the order number above or use USB/Bluetooth scanner.
+        Camera not working? Type the order number above or use USB/Bluetooth scanner.
       </div>
     </div>
   );
