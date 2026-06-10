@@ -1478,15 +1478,10 @@ function BarcodeScanner({onDetected}){
           <video ref={videoRef} style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover"}} muted playsInline/>
           {/* Scan frame overlay */}
           <div style={{position:"absolute",width:200,height:100,border:"1.5px solid #7B8CFF",borderRadius:5,pointerEvents:"none"}}>
-            {[["0 0","4px 0 0","borderWidth":"3px 0 0 3px"],["auto 0 0 auto","borderWidth":"3px 3px 0 0"],["auto auto 0 0","borderWidth":"0 0 3px 3px"],["0 auto","borderWidth":"0 3px 3px 0"]].map((_,i)=>{
-              const corners=[
-                {top:"-2px",left:"-2px",borderWidth:"3px 0 0 3px"},
-                {top:"-2px",right:"-2px",borderWidth:"3px 3px 0 0"},
-                {bottom:"-2px",left:"-2px",borderWidth:"0 0 3px 3px"},
-                {bottom:"-2px",right:"-2px",borderWidth:"0 3px 3px 0"},
-              ];
-              return <div key={i} style={{position:"absolute",width:12,height:12,borderColor:"#00D4AA",borderStyle:"solid",...corners[i]}}/>;
-            })}
+            <div style={{position:"absolute",width:12,height:12,top:"-2px",left:"-2px",borderColor:"#00D4AA",borderStyle:"solid",borderWidth:"3px 0 0 3px"}}/>
+            <div style={{position:"absolute",width:12,height:12,top:"-2px",right:"-2px",borderColor:"#00D4AA",borderStyle:"solid",borderWidth:"3px 3px 0 0"}}/>
+            <div style={{position:"absolute",width:12,height:12,bottom:"-2px",left:"-2px",borderColor:"#00D4AA",borderStyle:"solid",borderWidth:"0 0 3px 3px"}}/>
+            <div style={{position:"absolute",width:12,height:12,bottom:"-2px",right:"-2px",borderColor:"#00D4AA",borderStyle:"solid",borderWidth:"0 3px 3px 0"}}/>
             <div style={{position:"absolute",width:"100%",height:2,background:"linear-gradient(to right,transparent,#00D4AA,transparent)",animation:"scan 1.5s ease-in-out infinite"}}></div>
           </div>
           <div style={{position:"absolute",bottom:6,fontSize:9,color:"rgba(255,255,255,.4)"}}>Hold steady — auto-captures on detect</div>
