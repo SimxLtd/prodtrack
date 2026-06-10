@@ -244,6 +244,7 @@ function ProductionScheduler({user,onLogout}){
   // new order
   const [nf,setNf]=useState({selectedEmployees:[],orderNumber:"",itemId:"",lineId:"",productionQty:"",startDateTime:"",autoFilled:false});
   const [orderSearchQ,setOrderSearchQ]=useState("");
+  const [scannerOpen,setScannerOpen]=useState(false);
   const [orderSearching,setOrderSearching]=useState(false);
   // search
   const [sq,setSq]=useState(""); const [sr,setSr]=useState(null); const [snf,setSnf]=useState(false);
@@ -273,6 +274,25 @@ function ProductionScheduler({user,onLogout}){
   useEffect(()=>{loadAll();},[loadAll]);
 
   // ── Order search auto-fill ──
+  const handleOrderSearchDirect=async(code)=>{
+    if(!code?.trim()) return;
+    setOrderSearching(true);
+    try{
+      const r=await db.findPlanned(code.trim().toUpperCase());
+      if(r.length){
+        const p=r[0];
+        const sdt=p.scheduled_datetime?new Date(p.scheduled_datetime).toLocaleString("sv",{timeZone:NZ_TZ}).slice(0,16).replace(" ","T"):"";
+        const matchedLine=findLine(lines,p.line_id);
+        const resolvedLineId=matchedLine?matchedLine.id:(p.line_id||"");
+        setNf(f=>({...f,orderNumber:p.order_number,itemId:p.item_id||"",lineId:resolvedLineId,productionQty:p.production_qty?String(p.production_qty):"",startDateTime:sdt,autoFilled:true}));
+        showToast("Order scanned & found — fields auto-filled!");
+      } else {
+        setNf(f=>({...f,orderNumber:code.trim().toUpperCase(),autoFilled:false}));
+        showToast("Order not in planned list — fill fields manually.","warn");
+      }
+    }catch(e){showToast("Search failed.","error");}
+    setOrderSearching(false);
+  };
   const handleOrderSearch=async()=>{
     if(!orderSearchQ.trim()){showToast("Enter an order number.","error");return;}
     setOrderSearching(true);
@@ -475,13 +495,27 @@ function ProductionScheduler({user,onLogout}){
             <div className="au" style={{maxWidth:660}}>
               <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase",marginBottom:20}}>Start New Production Order</h2>
               <div className="card">
-                {/* Order search */}
+                {/* Order search + barcode scan */}
                 <div className="fg">
                   <label>Order Number * <span style={{color:"#7B8CFF",fontSize:10,letterSpacing:0}}>— search to auto-fill</span></label>
                   <div style={{display:"flex",gap:8}}>
-                    <input placeholder="Type order number & click Find" value={orderSearchQ} onChange={e=>setOrderSearchQ(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Enter"&&handleOrderSearch()} style={{flex:1}} disabled={orderSearching}/>
-                    <button className="bp" onClick={handleOrderSearch} disabled={orderSearching} style={{whiteSpace:"nowrap",padding:"10px 14px",fontSize:12}}>{orderSearching?"…":"🔍 Find"}</button>
+                    <input
+                      placeholder="Type order number & click Find"
+                      value={orderSearchQ}
+                      onChange={e=>setOrderSearchQ(e.target.value.toUpperCase())}
+                      onKeyDown={e=>{if(e.key==="Enter"){setScannerOpen(false);handleOrderSearch();}}}
+                      style={{flex:1}}
+                      disabled={orderSearching}
+                    />
+                    <button className="bp" onClick={()=>{setScannerOpen(false);handleOrderSearch();}} disabled={orderSearching} style={{whiteSpace:"nowrap",padding:"10px 14px",fontSize:12}}>{orderSearching?"…":"🔍 Find"}</button>
+                    <button
+                      onClick={()=>setScannerOpen(o=>!o)}
+                      style={{whiteSpace:"nowrap",padding:"10px 14px",fontSize:12,fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,cursor:"pointer",borderRadius:4,border:"1px solid",background:scannerOpen?"rgba(123,140,255,.2)":"rgba(123,140,255,.1)",borderColor:scannerOpen?"#7B8CFF":"rgba(123,140,255,.3)",color:"#7B8CFF",transition:"all .15s"}}>
+                      {scannerOpen?"📷 Stop":"📷 Scan"}
+                    </button>
                   </div>
+                  <div style={{fontSize:10,color:"#5A5F78",marginTop:4}}>Type manually · 📷 Scan for camera · or USB/Bluetooth scanner scans directly into the field</div>
+                  {scannerOpen&&<BarcodeScanner onDetected={code=>{setOrderSearchQ(code);setScannerOpen(false);setTimeout(()=>handleOrderSearchDirect(code),100);}}/>}
                 </div>
                 {nf.autoFilled&&<div className="autofill-banner">✔ Order found — fields auto-filled. Select employee(s) and confirm.</div>}
 
@@ -1365,6 +1399,105 @@ function UserRow({u,onToggle,onResetPw}){
   );
 }
 
+
+
+// ══════════════════════════════════════════════════════════════
+//  BARCODE SCANNER (camera + USB/BT)
+// ══════════════════════════════════════════════════════════════
+function BarcodeScanner({onDetected}){
+  const videoRef=useRef(null);
+  const streamRef=useRef(null);
+  const rafRef=useRef(null);
+  const [error,setError]=useState(null);
+  const [lib,setLib]=useState(false);
+
+  // Load ZXing barcode library
+  useEffect(()=>{
+    if(window.ZXing){setLib(true);return;}
+    if(!document.getElementById("zxing-cdn")){
+      const s=document.createElement("script");
+      s.id="zxing-cdn";
+      s.src="https://cdnjs.cloudflare.com/ajax/libs/zxing-js/0.18.6/index.min.js";
+      document.head.appendChild(s);
+    }
+    const poll=setInterval(()=>{if(window.ZXing){setLib(true);clearInterval(poll);}},200);
+    return()=>clearInterval(poll);
+  },[]);
+
+  // Start camera when lib ready
+  useEffect(()=>{
+    if(!lib) return;
+    let stopped=false;
+    const start=async()=>{
+      try{
+        const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment",width:{ideal:1280},height:{ideal:720}}});
+        if(stopped){stream.getTracks().forEach(t=>t.stop());return;}
+        streamRef.current=stream;
+        if(videoRef.current){
+          videoRef.current.srcObject=stream;
+          videoRef.current.play();
+        }
+        // Use ZXing to decode
+        const hints=new Map();
+        const codeReader=new window.ZXing.BrowserMultiFormatReader(hints);
+        codeReader.decodeFromVideoDevice(null,videoRef.current,(result,err)=>{
+          if(result&&!stopped){
+            onDetected(result.getText());
+            codeReader.reset();
+          }
+        }).catch(e=>setError("Camera error: "+e.message));
+      }catch(e){
+        setError(e.name==="NotAllowedError"?"Camera permission denied. Please allow camera access in your browser.":"Camera unavailable: "+e.message);
+      }
+    };
+    start();
+    return()=>{
+      stopped=true;
+      if(streamRef.current) streamRef.current.getTracks().forEach(t=>t.stop());
+      if(rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  },[lib]);
+
+  return(
+    <div style={{background:"#0F1117",border:"1px solid rgba(123,140,255,.3)",borderRadius:7,overflow:"hidden",marginTop:10}}>
+      <div style={{background:"#13161F",padding:"8px 12px",display:"flex",alignItems:"center",justifyContent:"space-between",borderBottom:"1px solid #2A2F45"}}>
+        <div style={{display:"flex",alignItems:"center",gap:7}}>
+          <span style={{width:7,height:7,borderRadius:"50%",background:"#7B8CFF",display:"inline-block",animation:"pulse 1s infinite"}}></span>
+          <span style={{fontSize:11,color:"#7B8CFF",fontWeight:700}}>Camera active — point at barcode or QR code</span>
+        </div>
+        <span style={{fontSize:9,color:"#5A5F78"}}>CODE128 · QR · EAN · CODE39</span>
+      </div>
+      {error?(
+        <div style={{padding:"20px 16px",textAlign:"center",color:"#FF4B6E",fontSize:12}}>
+          ⚠ {error}<br/>
+          <span style={{fontSize:10,color:"#5A5F78",marginTop:6,display:"block"}}>Use USB/Bluetooth scanner instead: click the order number field then scan.</span>
+        </div>
+      ):(
+        <div style={{position:"relative",background:"#000",height:200,display:"flex",alignItems:"center",justifyContent:"center"}}>
+          {!lib&&<div style={{color:"#5A5F78",fontSize:11}}>Loading scanner…</div>}
+          <video ref={videoRef} style={{position:"absolute",inset:0,width:"100%",height:"100%",objectFit:"cover"}} muted playsInline/>
+          {/* Scan frame overlay */}
+          <div style={{position:"absolute",width:200,height:100,border:"1.5px solid #7B8CFF",borderRadius:5,pointerEvents:"none"}}>
+            {[["0 0","4px 0 0","borderWidth":"3px 0 0 3px"],["auto 0 0 auto","borderWidth":"3px 3px 0 0"],["auto auto 0 0","borderWidth":"0 0 3px 3px"],["0 auto","borderWidth":"0 3px 3px 0"]].map((_,i)=>{
+              const corners=[
+                {top:"-2px",left:"-2px",borderWidth:"3px 0 0 3px"},
+                {top:"-2px",right:"-2px",borderWidth:"3px 3px 0 0"},
+                {bottom:"-2px",left:"-2px",borderWidth:"0 0 3px 3px"},
+                {bottom:"-2px",right:"-2px",borderWidth:"0 3px 3px 0"},
+              ];
+              return <div key={i} style={{position:"absolute",width:12,height:12,borderColor:"#00D4AA",borderStyle:"solid",...corners[i]}}/>;
+            })}
+            <div style={{position:"absolute",width:"100%",height:2,background:"linear-gradient(to right,transparent,#00D4AA,transparent)",animation:"scan 1.5s ease-in-out infinite"}}></div>
+          </div>
+          <div style={{position:"absolute",bottom:6,fontSize:9,color:"rgba(255,255,255,.4)"}}>Hold steady — auto-captures on detect</div>
+        </div>
+      )}
+      <div style={{textAlign:"center",padding:"7px",fontSize:10,color:"#5A5F78",background:"#13161F"}}>
+        No camera? Type the order number above or use USB/Bluetooth scanner.
+      </div>
+    </div>
+  );
+}
 
 // ══════════════════════════════════════════════════════════════
 //  MONTHLY EFFICIENCY TRACKER
