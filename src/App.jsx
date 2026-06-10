@@ -1474,9 +1474,7 @@ function BarcodeScanner({onDetected}){
         rafRef.current=requestAnimationFrame(tick);
       }catch(e){
         if(e.name==="NotAllowedError"){
-          setError("Camera permission denied.
-
-On iPad: go to Settings → Safari → Camera → Allow.");
+          setError("Camera permission denied. On iPad: Settings → Safari → Camera → Allow.");
         } else if(e.name==="NotFoundError"||e.name==="DevicesNotFoundError"){
           setError("No camera found on this device.");
         } else {
