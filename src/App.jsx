@@ -1507,8 +1507,7 @@ function BarcodeScanner({onDetected}){
       {/* Body */}
       {error?(
         <div style={{padding:"20px 16px",textAlign:"center",color:"#FF4B6E",fontSize:12,lineHeight:1.7}}>
-          ⚠ {error.split("
-").map((l,i)=><span key={i}>{l}<br/></span>)}
+          ⚠ {error}
           <div style={{fontSize:10,color:"#5A5F78",marginTop:8}}>
             USB/Bluetooth scanner works without camera — just click the order number field and scan.
           </div>
