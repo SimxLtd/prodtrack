@@ -241,6 +241,7 @@ function ProductionScheduler({user,onLogout}){
   const [loading,setLoading]=useState(true);
   const [saving,setSaving]=useState(false);
   const [toast,setToast]=useState(null);
+  const [activeSearch,setActiveSearch]=useState("");
   // new order
   const [nf,setNf]=useState({selectedEmployees:[],orderNumber:"",itemId:"",lineId:"",productionQty:"",startDateTime:"",autoFilled:false});
   const [orderSearchQ,setOrderSearchQ]=useState("");
@@ -468,7 +469,7 @@ function ProductionScheduler({user,onLogout}){
         ):(
           <>
           {/* ═══ DASHBOARD ═══ */}
-          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} reload={loadAll}/>}
+          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} reload={loadAll} activeSearch={activeSearch} setActiveSearch={setActiveSearch}/>}
 
           {/* ═══ NEW ORDER ═══ */}
           {view==="new"&&(
@@ -744,7 +745,7 @@ function ProductionScheduler({user,onLogout}){
 // ══════════════════════════════════════════════════════════════
 //  DASHBOARD
 // ══════════════════════════════════════════════════════════════
-function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,reload}){
+function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,reload,activeSearch,setActiveSearch}){
   const overallEffAvg=(()=>{const e=orders.filter(o=>o.status==="Completed"&&o.efficiency!=null).map(o=>o.efficiency);return e.length?Math.round(e.reduce((a,b)=>a+b)/e.length):null;})();
   const td=new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});
   const toLocalDate=dt=>{if(!dt)return"";return new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});};
@@ -815,17 +816,51 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
         </div>
       )}
 
-      {/* Active Orders */}
-      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+      {/* Active Orders + Search */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
         <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>{isAdmin?"Active Orders":"My Active Orders"} ({activeOrders.length})</h2>
         <div style={{display:"flex",gap:8}}>
           <button className="bg" style={{fontSize:11}} onClick={reload}>↻ Refresh</button>
           <button className="bp" onClick={onNewOrder}>+ New Order</button>
         </div>
       </div>
+      {/* Search bar */}
+      <div style={{display:"flex",alignItems:"center",gap:10,background:"#13161F",border:"1px solid #2A2F45",borderRadius:7,padding:"8px 14px",marginBottom:12,transition:"border .15s",...(activeSearch?{borderColor:"rgba(0,212,170,.35)"}:{})}}>
+        <span style={{color:"#5A5F78",fontSize:14,flexShrink:0}}>🔍</span>
+        <input
+          placeholder="Search active orders by order number or employee…"
+          value={activeSearch}
+          onChange={e=>setActiveSearch(e.target.value.toUpperCase())}
+          onKeyDown={e=>e.key==="Escape"&&setActiveSearch("")}
+          style={{background:"transparent",border:"none",color:activeSearch?"#00D4AA":"#E8EAF0",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,flex:1,outline:"none"}}
+        />
+        {activeSearch&&(
+          <button onClick={()=>setActiveSearch("")} style={{background:"none",border:"none",color:"#5A5F78",cursor:"pointer",fontSize:14,padding:"0 2px",lineHeight:1}}
+            onMouseEnter={e=>e.currentTarget.style.color="#FF4B6E"}
+            onMouseLeave={e=>e.currentTarget.style.color="#5A5F78"}>✕</button>
+        )}
+        {!activeSearch&&<span style={{fontSize:9,color:"#4A4F65",whiteSpace:"nowrap"}}>USB/BT scanner — click here then scan</span>}
+      </div>
       {activeOrders.length===0
         ?<div className="card" style={{textAlign:"center",padding:40,color:"#4A4F65"}}><div style={{fontSize:36,marginBottom:10}}>📭</div><div>No active orders.</div></div>
-        :<div style={{display:"grid",gap:10}}>{activeOrders.map(o=><OrderCard key={o.id} order={o} item={items.find(i=>i.id===o.item_id)} onClose={!o.is_paused?()=>onClose(o):null} onPause={!o.is_paused?()=>onPause(o):null} onResume={o.is_paused?()=>onResume(o):null}/>)}</div>
+        :<div style={{display:"grid",gap:10}}>{activeOrders.map(o=>{
+          const q=activeSearch.trim();
+          const isMatch=q&&(
+            o.order_number?.toUpperCase().includes(q)||
+            (o.employees||[o.employee]).some(e=>e?.toUpperCase().includes(q))
+          );
+          return(
+            <div key={o.id} id={"order-"+o.id}
+              style={{borderRadius:8,transition:"box-shadow .2s",...(isMatch?{boxShadow:"0 0 0 2px #00D4AA"}:{})}}>
+              <OrderCard order={o} item={items.find(i=>i.id===o.item_id)}
+                onClose={!o.is_paused?()=>onClose(o):null}
+                onPause={!o.is_paused?()=>onPause(o):null}
+                onResume={o.is_paused?()=>onResume(o):null}
+                highlight={!!isMatch}
+              />
+            </div>
+          );
+        })}</div>
       }
     </div>
   );
