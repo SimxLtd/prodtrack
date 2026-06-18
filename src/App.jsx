@@ -427,7 +427,7 @@ function ProductionScheduler({user,onLogout}){
   // Active orders
   const activeOrders=orders.filter(o=>o.status==="In Progress");
   // Worker sees only their own active orders; admin sees all
-  const myActiveOrders=isAdmin?activeOrders:activeOrders.filter(isMine);
+  const myActiveOrders=activeOrders;
   // Today's orders by local start date — ALL employees for both admin and worker
   const todayOrders=orders.filter(o=>toLocalDate(o.start_datetime)===td);
   const todayDone=todayOrders.filter(o=>o.status==="Completed");
@@ -582,6 +582,12 @@ function ProductionScheduler({user,onLogout}){
 
               {/* ── Monthly Efficiency Tracker ── */}
               <MonthlyTracker orders={orders} items={items}/>
+
+              {/* ── Divider ── */}
+              <div style={{height:1,background:"#2A2F45",margin:"22px 0"}}/>
+
+              {/* ── Employee Efficiency ── */}
+              <EmployeeEfficiency orders={orders} employees={employees}/>
             </div>
           )}
 
@@ -881,7 +887,7 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
 
       {/* Active Orders + Search */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-        <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>{isAdmin?"Active Orders":"My Active Orders"} ({activeOrders.length})</h2>
+        <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>Active Orders ({activeOrders.length})</h2>
         <div style={{display:"flex",gap:8}}>
           <button className="bg" style={{fontSize:11}} onClick={reload}>↻ Refresh</button>
           <button className="bp" onClick={onNewOrder}>+ New Order</button>
@@ -1762,6 +1768,151 @@ function MonthlyTracker({orders,items}){
               })}
             </tbody>
           </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+//  EMPLOYEE EFFICIENCY
+// ══════════════════════════════════════════════════════════════
+function EmployeeEfficiency({orders,employees}){
+  const nowNZ = new Date();
+  const curNZDate  = nowNZ.toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+  const curNZYear  = Number(curNZDate.slice(0,4));
+  const curNZMonth = Number(curNZDate.slice(5,7))-1;
+
+  const [selEmp,setSelEmp]     = useState(employees[0]||"");
+  const [selYear,setSelYear]   = useState(curNZYear);
+  const [selMonth,setSelMonth] = useState(curNZMonth);
+
+  const isCurrentMonth = selYear===curNZYear && selMonth===curNZMonth;
+  const prevMonth=()=>{ if(selMonth===0){setSelMonth(11);setSelYear(y=>y-1);}else setSelMonth(m=>m-1); };
+  const nextMonth=()=>{ if(isCurrentMonth) return; if(selMonth===11){setSelMonth(0);setSelYear(y=>y+1);}else setSelMonth(m=>m+1); };
+  const goCurrentMonth=()=>{ setSelYear(curNZYear); setSelMonth(curNZMonth); };
+
+  const monthStr=String(selMonth+1).padStart(2,"0");
+  const monthName=new Date(selYear,selMonth,1).toLocaleDateString("en-NZ",{month:"long",year:"numeric"});
+  const toNZ = dt => !dt?"":new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+
+  // Orders this employee worked on (solo or with others) within the selected month, completed only
+  const empOrders = selEmp ? orders.filter(o=>{
+    if(o.status!=="Completed") return false;
+    if(!(o.employees||[o.employee]).includes(selEmp)) return false;
+    const od=toNZ(o.start_datetime);
+    if(!od) return false;
+    return od.slice(0,4)===String(selYear) && od.slice(5,7)===monthStr;
+  }).sort((a,b)=>new Date(b.start_datetime)-new Date(a.start_datetime)) : [];
+
+  const effVals   = empOrders.filter(o=>o.efficiency!=null).map(o=>o.efficiency);
+  const avgEff    = effVals.length ? Math.round(effVals.reduce((a,b)=>a+b,0)/effVals.length) : null;
+  const totalPieces = empOrders.reduce((a,o)=>a+(o.end_qty||0),0);
+  const totalHrs  = (empOrders.reduce((a,o)=>a+(o.working_minutes||o.actual_minutes||0),0)/60).toFixed(1);
+
+  return(
+    <div>
+      {/* Header row */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>
+            Employee Efficiency <span style={{background:"rgba(0,212,170,.12)",color:"#00D4AA",fontSize:9,padding:"2px 7px",borderRadius:8,border:"1px solid rgba(0,212,170,.2)",fontWeight:700,marginLeft:6}}>NEW</span>
+          </div>
+          <div style={{fontSize:10,color:"#5A5F78",marginTop:2}}>Average efficiency per employee for the selected month</div>
+        </div>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          {/* Employee select */}
+          <select value={selEmp} onChange={e=>setSelEmp(e.target.value)}
+            style={{background:"#13161F",border:`1px solid ${selEmp?"#00D4AA":"#2A2F45"}`,color:selEmp?"#00D4AA":"#E8EAF0",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,padding:"7px 12px",borderRadius:5,minWidth:160}}>
+            {employees.length===0&&<option value="">No employees</option>}
+            {employees.map(e=><option key={e} value={e}>{e}</option>)}
+          </select>
+          {/* Month nav */}
+          <div style={{display:"flex",alignItems:"center",background:"#1A1D27",border:"1px solid #2A2F45",borderRadius:6,overflow:"hidden"}}>
+            <button onClick={prevMonth} style={{background:"none",border:"none",color:"#8B90A8",fontSize:15,padding:"6px 11px",cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace"}}
+              onMouseEnter={e=>{e.currentTarget.style.color="#00D4AA";e.currentTarget.style.background="rgba(0,212,170,.07)";}}
+              onMouseLeave={e=>{e.currentTarget.style.color="#8B90A8";e.currentTarget.style.background="none";}}>‹</button>
+            <div style={{fontSize:11,color:"#E8EAF0",padding:"6px 12px",fontWeight:700,minWidth:110,textAlign:"center",borderLeft:"1px solid #2A2F45",borderRight:"1px solid #2A2F45"}}>{monthName}</div>
+            <button onClick={nextMonth} disabled={isCurrentMonth}
+              style={{background:"none",border:"none",color:isCurrentMonth?"#3A3F55":"#8B90A8",fontSize:15,padding:"6px 11px",cursor:isCurrentMonth?"not-allowed":"pointer",fontFamily:"'IBM Plex Mono',monospace"}}
+              onMouseEnter={e=>{if(!isCurrentMonth){e.currentTarget.style.color="#00D4AA";e.currentTarget.style.background="rgba(0,212,170,.07)";}}}
+              onMouseLeave={e=>{e.currentTarget.style.color=isCurrentMonth?"#3A3F55":"#8B90A8";e.currentTarget.style.background="none";}}>›</button>
+          </div>
+          {!isCurrentMonth&&(
+            <button onClick={goCurrentMonth} style={{background:"rgba(0,212,170,.1)",border:"1px solid rgba(0,212,170,.25)",color:"#00D4AA",fontSize:10,padding:"6px 12px",borderRadius:4,cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,whiteSpace:"nowrap"}}>
+              Current Month
+            </button>
+          )}
+        </div>
+      </div>
+
+      {!selEmp ? (
+        <div className="card" style={{textAlign:"center",padding:32,color:"#4A4F65"}}>Select an employee to view their efficiency.</div>
+      ) : (
+        <div className="card">
+          {/* KPI cards */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:10,marginBottom:16}}>
+            <div style={{background:"#13161F",borderRadius:6,padding:"10px 12px"}}>
+              <div style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>Avg Efficiency</div>
+              <div style={{fontSize:18,fontWeight:700,color:effColor(avgEff)}}>{avgEff!=null?avgEff+"%":"—"}</div>
+              <div style={{fontSize:9,color:"#5A5F78",marginTop:3}}>{empOrders.length} order{empOrders.length!==1?"s":""} this month</div>
+            </div>
+            <div style={{background:"#13161F",borderRadius:6,padding:"10px 12px"}}>
+              <div style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>Orders Worked</div>
+              <div style={{fontSize:18,fontWeight:700,color:"#C8CADC"}}>{empOrders.length}</div>
+              <div style={{fontSize:9,color:"#5A5F78",marginTop:3}}>solo + multi-employee</div>
+            </div>
+            <div style={{background:"#13161F",borderRadius:6,padding:"10px 12px"}}>
+              <div style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>Total Pieces</div>
+              <div style={{fontSize:18,fontWeight:700,color:"#FF9500"}}>{totalPieces.toLocaleString()}</div>
+              <div style={{fontSize:9,color:"#5A5F78",marginTop:3}}>contributed across orders</div>
+            </div>
+            <div style={{background:"#13161F",borderRadius:6,padding:"10px 12px"}}>
+              <div style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase",marginBottom:3}}>Total Hours</div>
+              <div style={{fontSize:18,fontWeight:700,color:"#7B8CFF"}}>{totalHrs}h</div>
+              <div style={{fontSize:9,color:"#5A5F78",marginTop:3}}>working time only</div>
+            </div>
+          </div>
+
+          {/* Orders table */}
+          {empOrders.length===0?(
+            <div style={{textAlign:"center",padding:32,color:"#4A4F65",fontSize:12}}>No completed orders for {selEmp} in {monthName}.</div>
+          ):(
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+                <thead>
+                  <tr style={{borderBottom:"1px solid #2A2F45"}}>
+                    {["Order","Date","Co-workers","Line","End Qty","Efficiency"].map(h=>(
+                      <th key={h} style={{padding:"8px 10px",textAlign:"left",color:"#5A5F78",fontSize:10,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {empOrders.map(o=>{
+                    const coworkers=(o.employees||[o.employee]).filter(e=>e!==selEmp);
+                    const ec=effColor(o.efficiency);
+                    return(
+                      <tr key={o.id} style={{borderBottom:"1px solid #1E2135"}}
+                        onMouseEnter={e=>e.currentTarget.style.background="#1A1F30"}
+                        onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                        <td style={{padding:"8px 10px",color:"#00D4AA",fontWeight:700}}>{o.order_number}</td>
+                        <td style={{padding:"8px 10px",color:"#8B90A8",fontSize:11}}>{new Date(o.start_datetime).toLocaleDateString("en-NZ",{timeZone:NZ_TZ,day:"2-digit",month:"short"})}</td>
+                        <td style={{padding:"8px 10px",color:coworkers.length?"#C8CADC":"#5A5F78"}}>{coworkers.length?coworkers.join(", "):"— solo —"}</td>
+                        <td style={{padding:"8px 10px",color:"#7B8CFF"}}>{o.line_id}</td>
+                        <td style={{padding:"8px 10px",textAlign:"center"}}>{o.end_qty??"—"}</td>
+                        <td style={{padding:"8px 10px"}}>
+                          {o.efficiency!=null
+                            ?<span style={{fontSize:11,fontWeight:700,color:ec,background:ec+"22",padding:"2px 8px",borderRadius:12,border:`1px solid ${ec}44`}}>{o.efficiency}%</span>
+                            :<span style={{color:"#4A4F65"}}>—</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+              <div style={{fontSize:9,color:"#5A5F78",marginTop:10}}>Multi-employee orders credit the same efficiency to all workers on that order.</div>
+            </div>
+          )}
         </div>
       )}
     </div>
