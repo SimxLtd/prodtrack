@@ -251,7 +251,7 @@ function ProductionScheduler({user,onLogout}){
   // close modal
   const [cm,setCm]=useState(null); const [cf,setCf]=useState({endQty:"",remarks:""});
   // records
-  const [fEmp,setFEmp]=useState("All"); const [fLine,setFLine]=useState("All"); const [fStatus,setFStatus]=useState("All");
+  const [fEmp,setFEmp]=useState("All"); const [fLine,setFLine]=useState("All"); const [fStatus,setFStatus]=useState("All"); const [fItem,setFItem]=useState("All"); const [fOrder,setFOrder]=useState("");
   const [fFrom,setFFrom]=useState(()=>new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"})); const [fTo,setFTo]=useState(()=>new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"}));
   const [sortF,setSortF]=useState("created_at"); const [sortD,setSortD]=useState("desc");
 
@@ -384,10 +384,12 @@ function ProductionScheduler({user,onLogout}){
       const em=fEmp==="All"||o.employee===fEmp||(o.employees&&o.employees.includes(fEmp));
       const lm=fLine==="All"||o.line_id===fLine;
       const sm=fStatus==="All"||o.status===fStatus;
+      const im=fItem==="All"||o.item_id===fItem;
+      const om=!fOrder.trim()||o.order_number?.toUpperCase().includes(fOrder.trim().toUpperCase());
       const orderDate=toNZDate(o.start_datetime);
       const df=!fFrom||orderDate>=fFrom;
       const dt=!fTo||orderDate<=fTo;
-      return em&&lm&&sm&&df&&dt;
+      return em&&lm&&sm&&im&&om&&df&&dt;
     })
     .sort((a,b)=>{
       let av=a[sortF]??"",bv=b[sortF]??"";
@@ -425,7 +427,7 @@ function ProductionScheduler({user,onLogout}){
   // Active orders
   const activeOrders=orders.filter(o=>o.status==="In Progress");
   // Worker sees only their own active orders; admin sees all
-  const myActiveOrders=activeOrders;
+  const myActiveOrders=isAdmin?activeOrders:activeOrders.filter(isMine);
   // Today's orders by local start date — ALL employees for both admin and worker
   const todayOrders=orders.filter(o=>toLocalDate(o.start_datetime)===td);
   const todayDone=todayOrders.filter(o=>o.status==="Completed");
@@ -604,6 +606,20 @@ function ProductionScheduler({user,onLogout}){
                     <label>Status</label>
                     <select value={fStatus} onChange={e=>setFStatus(e.target.value)}><option value="All">All</option><option>In Progress</option><option>Completed</option></select>
                   </div>
+                  <div style={{flex:"0 0 180px"}}>
+                    <label>Item</label>
+                    <select value={fItem} onChange={e=>setFItem(e.target.value)} style={{fontSize:11}}>
+                      <option value="All">All</option>
+                      {[...new Set(orders.map(o=>o.item_id).filter(Boolean))].sort().map(id=>{
+                        const nm=items.find(i=>i.id===id)?.name||"";
+                        return <option key={id} value={id}>{id}{nm?` — ${nm.slice(0,18)}`:""}</option>;
+                      })}
+                    </select>
+                  </div>
+                  <div style={{flex:"1 1 150px",minWidth:130}}>
+                    <label>Order Number</label>
+                    <input placeholder="Type to search…" value={fOrder} onChange={e=>setFOrder(e.target.value.toUpperCase())} onKeyDown={e=>e.key==="Escape"&&setFOrder("")}/>
+                  </div>
                   <div style={{flex:"1 1 320px",minWidth:280}}>
                     <label>Date Range</label>
                     <div style={{display:"flex",gap:6,alignItems:"center"}}>
@@ -618,7 +634,7 @@ function ProductionScheduler({user,onLogout}){
                         onClick={()=>{setFFrom(t);setFTo(t);}}>Today</button>
                     );})()}
                     <button className="bg" style={{whiteSpace:"nowrap",fontSize:11,padding:"9px 14px"}}
-                      onClick={()=>{setFEmp("All");setFLine("All");setFStatus("All");setFFrom("");setFTo("");setSortF("created_at");setSortD("desc");}}>✕ Clear All</button>
+                      onClick={()=>{setFEmp("All");setFLine("All");setFStatus("All");setFItem("All");setFOrder("");setFFrom("");setFTo("");setSortF("created_at");setSortD("desc");}}>✕ Clear All</button>
                   </div>
                 </div>
               </div>
