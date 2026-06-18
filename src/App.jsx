@@ -251,7 +251,7 @@ function ProductionScheduler({user,onLogout}){
   // close modal
   const [cm,setCm]=useState(null); const [cf,setCf]=useState({endQty:"",remarks:""});
   // records
-  const [fEmp,setFEmp]=useState("All"); const [fLine,setFLine]=useState("All"); const [fStatus,setFStatus]=useState("All"); const [fItem,setFItem]=useState("All"); const [fOrder,setFOrder]=useState("");
+  const [fEmp,setFEmp]=useState("All"); const [fLine,setFLine]=useState("All"); const [fStatus,setFStatus]=useState("All"); const [fItem,setFItem]=useState("All"); const [fOrder,setFOrder]=useState(""); const [fItemSearch,setFItemSearch]=useState("");
   const [fFrom,setFFrom]=useState(()=>new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"})); const [fTo,setFTo]=useState(()=>new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"}));
   const [sortF,setSortF]=useState("created_at"); const [sortD,setSortD]=useState("desc");
 
@@ -606,15 +606,62 @@ function ProductionScheduler({user,onLogout}){
                     <label>Status</label>
                     <select value={fStatus} onChange={e=>setFStatus(e.target.value)}><option value="All">All</option><option>In Progress</option><option>Completed</option></select>
                   </div>
-                  <div style={{flex:"0 0 180px"}}>
-                    <label>Item</label>
-                    <select value={fItem} onChange={e=>setFItem(e.target.value)} style={{fontSize:11}}>
-                      <option value="All">All</option>
-                      {[...new Set(orders.map(o=>o.item_id).filter(Boolean))].sort().map(id=>{
-                        const nm=items.find(i=>i.id===id)?.name||"";
-                        return <option key={id} value={id}>{id}{nm?` — ${nm.slice(0,18)}`:""}</option>;
-                      })}
-                    </select>
+                  <div style={{flex:"1 1 200px",minWidth:180,position:"relative"}}>
+                    <label>Item {fItem!=="All"&&<span style={{color:"#00D4AA",fontSize:9}}>— filtered</span>}</label>
+                    {(()=>{
+                      // Build date-filtered item list
+                      const dfOrders=orders.filter(o=>{
+                        const od=toNZDate(o.start_datetime);
+                        return(!fFrom||od>=fFrom)&&(!fTo||od<=fTo);
+                      });
+                      const allIds=[...new Set(dfOrders.map(o=>o.item_id).filter(Boolean))].sort();
+                      const filteredIds=fItemSearch.trim()
+                        ?allIds.filter(id=>{
+                            const nm=items.find(i=>i.id===id)?.name||"";
+                            const q=fItemSearch.trim().toUpperCase();
+                            return id.toUpperCase().includes(q)||nm.toUpperCase().includes(q);
+                          })
+                        :allIds;
+                      return(
+                        <div style={{position:"relative"}}>
+                          <div style={{display:"flex",gap:4,alignItems:"center"}}>
+                            <input
+                              placeholder={fItem==="All"?"Search items…":fItem}
+                              value={fItemSearch}
+                              onChange={e=>{setFItemSearch(e.target.value);if(!e.target.value)setFItem("All");}}
+                              onKeyDown={e=>e.key==="Escape"&&(setFItemSearch(""),setFItem("All"))}
+                              style={{flex:1,fontSize:11,...(fItem!=="All"?{borderColor:"#00D4AA",color:"#00D4AA"}:{})}}
+                            />
+                            {(fItem!=="All"||fItemSearch)&&(
+                              <button onClick={()=>{setFItem("All");setFItemSearch("");}}
+                                style={{background:"none",border:"none",color:"#5A5F78",cursor:"pointer",fontSize:14,padding:"0 4px",flexShrink:0,lineHeight:1}}
+                                onMouseEnter={e=>e.currentTarget.style.color="#FF4B6E"}
+                                onMouseLeave={e=>e.currentTarget.style.color="#5A5F78"}>✕</button>
+                            )}
+                          </div>
+                          {fItemSearch.trim()&&(
+                            <div style={{position:"absolute",zIndex:100,top:"100%",left:0,right:0,marginTop:3,background:"#1A1D27",border:"1px solid #2A2F45",borderRadius:5,boxShadow:"0 6px 24px rgba(0,0,0,.5)",maxHeight:200,overflowY:"auto"}}>
+                              {filteredIds.length===0
+                                ?<div style={{padding:"10px 12px",color:"#4A4F65",fontSize:11}}>No items found</div>
+                                :filteredIds.map(id=>{
+                                  const nm=items.find(i=>i.id===id)?.name||"";
+                                  return(
+                                    <div key={id} onClick={()=>{setFItem(id);setFItemSearch("");}}
+                                      style={{padding:"8px 12px",cursor:"pointer",fontSize:11,borderBottom:"1px solid #1E2135",display:"flex",justifyContent:"space-between",alignItems:"center",background:fItem===id?"rgba(0,212,170,.08)":"transparent"}}
+                                      onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,.04)"}
+                                      onMouseLeave={e=>e.currentTarget.style.background=fItem===id?"rgba(0,212,170,.08)":"transparent"}>
+                                      <span style={{color:"#5A5F78",marginRight:8,fontSize:10}}>{id}</span>
+                                      <span style={{color:"#C8CADC",flex:1}}>{nm}</span>
+                                    </div>
+                                  );
+                                })
+                              }
+                              <div style={{padding:"6px 12px",fontSize:9,color:"#4A4F65",borderTop:"1px solid #1E2135"}}>{filteredIds.length} item{filteredIds.length!==1?"s":""} in selected date range</div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </div>
                   <div style={{flex:"1 1 150px",minWidth:130}}>
                     <label>Order Number</label>
@@ -634,7 +681,7 @@ function ProductionScheduler({user,onLogout}){
                         onClick={()=>{setFFrom(t);setFTo(t);}}>Today</button>
                     );})()}
                     <button className="bg" style={{whiteSpace:"nowrap",fontSize:11,padding:"9px 14px"}}
-                      onClick={()=>{setFEmp("All");setFLine("All");setFStatus("All");setFItem("All");setFOrder("");setFFrom("");setFTo("");setSortF("created_at");setSortD("desc");}}>✕ Clear All</button>
+                      onClick={()=>{setFEmp("All");setFLine("All");setFStatus("All");setFItem("All");setFOrder("");setFItemSearch("");setFFrom("");setFTo("");setSortF("created_at");setSortD("desc");}}>✕ Clear All</button>
                   </div>
                 </div>
               </div>
