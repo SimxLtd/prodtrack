@@ -38,6 +38,10 @@ const db = {
   deleteLine:     (id)    => sb(`pt_lines?id=eq.${id}`,{method:"PATCH",body:JSON.stringify({active:false})}),
   getOrders:      ()      => sbAll("pt_orders","order=created_at.desc"),
   getMyOrders:    (emp)   => sbAll("pt_orders",`employee=ilike.*${encodeURIComponent(emp)}*&order=created_at.desc`),
+  // ── Tiered loading for performance ──
+  getActiveOrders: ()     => sbAll("pt_orders","status=eq.In Progress&order=created_at.desc"),
+  getMonthOrders:  (fromISO,toISO) => sbAll("pt_orders",`start_datetime=gte.${fromISO}&start_datetime=lte.${toISO}&order=created_at.desc`),
+  getYearSummary:  (fromISO,toISO) => sbAll("pt_orders",`start_datetime=gte.${fromISO}&start_datetime=lte.${toISO}&select=start_datetime,status,efficiency`),
   addOrder:       (o)     => sb("pt_orders",{method:"POST",body:JSON.stringify(o)}),
   updateOrder:    (id,o)  => sb(`pt_orders?id=eq.${id}`,{method:"PATCH",body:JSON.stringify(o)}),
   searchOrder:    (n)     => sb(`pt_orders?order_number=eq.${encodeURIComponent(n)}`),
@@ -252,21 +256,46 @@ function ProductionScheduler({user,onLogout}){
   const [cm,setCm]=useState(null); const [cf,setCf]=useState({endQty:"",remarks:""});
   // records
   const [fEmp,setFEmp]=useState("All"); const [fLine,setFLine]=useState("All"); const [fStatus,setFStatus]=useState("All"); const [fItem,setFItem]=useState("All"); const [fOrder,setFOrder]=useState(""); const [fItemSearch,setFItemSearch]=useState("");
+  const [pageSize,setPageSize]=useState(50); const [curPage,setCurPage]=useState(1);
   const [fFrom,setFFrom]=useState(()=>new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"})); const [fTo,setFTo]=useState(()=>new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"}));
   const [sortF,setSortF]=useState("created_at"); const [sortD,setSortD]=useState("desc");
 
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
 
+  const [yearStats,setYearStats]=useState({orders:[],loading:true});
+
   const loadAll=useCallback(async()=>{
     setLoading(true);
     try{
-      if(isAdmin){
-        const [o,i,e,l]=await Promise.all([db.getOrders(),db.getItems(),db.getEmployees(),db.getLines()]);
-        setOrders(o); setItems(i); setEmployees(e.map(x=>x.name)); setLines(l);
-      } else {
-        const [o,i,e,l]=await Promise.all([db.getOrders(),db.getItems(),db.getEmployees(),db.getLines()]);
-        setOrders(o); setItems(i); setEmployees(e.map(x=>x.name)); setLines(l);
-      }
+      // Current month range (NZ timezone)
+      const now=new Date();
+      const y=now.toLocaleDateString("en-CA",{timeZone:NZ_TZ}).slice(0,4);
+      const m=now.toLocaleDateString("en-CA",{timeZone:NZ_TZ}).slice(5,7);
+      const monthFrom=`${y}-${m}-01T00:00:00`;
+      const lastDay=new Date(Number(y),Number(m),0).getDate();
+      const monthTo=`${y}-${m}-${String(lastDay).padStart(2,"0")}T23:59:59`;
+
+      // Tier 1a: current month's full order records (for stats/records/search/employee eff)
+      // Tier 1b: ALL active orders regardless of start date (so nothing running gets hidden)
+      const [monthOrders,activeOrders,i,e,l]=await Promise.all([
+        db.getMonthOrders(monthFrom,monthTo),
+        db.getActiveOrders(),
+        db.getItems(),db.getEmployees(),db.getLines()
+      ]);
+
+      // Merge: month orders + any active orders not already in that list (e.g. started in a prior month)
+      const monthIds=new Set(monthOrders.map(o=>o.id));
+      const merged=[...monthOrders, ...activeOrders.filter(o=>!monthIds.has(o.id))];
+
+      setOrders(merged); setItems(i); setEmployees(e.map(x=>x.name)); setLines(l);
+
+      // Tier 2: lightweight year summary (only 3 fields) — runs after, doesn't block dashboard
+      const yearFrom=`${y}-01-01T00:00:00`;
+      const yearTo=`${y}-12-31T23:59:59`;
+      db.getYearSummary(yearFrom,yearTo).then(ys=>{
+        setYearStats({orders:ys,loading:false});
+      }).catch(()=>setYearStats({orders:[],loading:false}));
+
     }catch(e){showToast("Failed to load: "+e.message,"error");}
     setLoading(false);
   },[isAdmin]);
@@ -398,6 +427,12 @@ function ProductionScheduler({user,onLogout}){
     });
   const handleSort=f=>{if(sortF===f)setSortD(d=>d==="asc"?"desc":"asc");else{setSortF(f);setSortD("asc");}};
 
+  // Pagination
+  const totalPages=Math.max(1,Math.ceil(filteredOrders.length/pageSize));
+  const safePage=Math.min(curPage,totalPages);
+  const pagedOrders=filteredOrders.slice((safePage-1)*pageSize,safePage*pageSize);
+  useEffect(()=>{setCurPage(1);},[fEmp,fLine,fStatus,fItem,fOrder,fFrom,fTo,pageSize]);
+
   const exportCSV=()=>{
     const H=["Order #","Employees","Num Emp","Line ID","Line","Item ID","Item","Std Min","Plan Qty","End Qty","Total Min","Break Min","Working Min","Man Hrs","Efficiency %","Start","End","Duration","Status","Remarks"];
     const R=filteredOrders.map(o=>[
@@ -471,7 +506,7 @@ function ProductionScheduler({user,onLogout}){
         ):(
           <>
           {/* ═══ DASHBOARD ═══ */}
-          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} reload={loadAll} activeSearch={activeSearch} setActiveSearch={setActiveSearch}/>}
+          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} reload={loadAll} activeSearch={activeSearch} setActiveSearch={setActiveSearch} yearStats={yearStats}/>}
 
           {/* ═══ NEW ORDER ═══ */}
           {view==="new"&&(
@@ -707,7 +742,7 @@ function ProductionScheduler({user,onLogout}){
                         </tr>
                       </thead>
                       <tbody>
-                        {filteredOrders.map(o=>{
+                        {pagedOrders.map(o=>{
                           const sc=STATUS_COLORS[o.status]||{dot:"#6C757D",bg:""};
                           const dur=o.end_datetime?getDur(o.start_datetime,o.end_datetime):"—";
                           const eff=o.efficiency; const ec=effColor(eff);
@@ -765,6 +800,24 @@ function ProductionScheduler({user,onLogout}){
                   </div>
                 )
               }
+              {/* Pagination controls */}
+              {filteredOrders.length>0&&(
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginTop:14,flexWrap:"wrap",gap:10}}>
+                  <div style={{fontSize:11,color:"#5A5F78"}}>
+                    Showing {(safePage-1)*pageSize+1}–{Math.min(safePage*pageSize,filteredOrders.length)} of {filteredOrders.length} records
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:8}}>
+                    <select value={pageSize} onChange={e=>setPageSize(Number(e.target.value))} style={{fontSize:11,padding:"5px 10px",width:"auto"}}>
+                      <option value={50}>50 / page</option>
+                      <option value={100}>100 / page</option>
+                      <option value={200}>200 / page</option>
+                    </select>
+                    <button className="bg" disabled={safePage<=1} onClick={()=>setCurPage(p=>Math.max(1,p-1))} style={{fontSize:11,padding:"6px 12px",opacity:safePage<=1?0.35:1}}>‹ Prev</button>
+                    <span style={{fontSize:11,color:"#00D4AA",fontWeight:700,padding:"6px 12px",background:"rgba(0,212,170,.08)",border:"1px solid rgba(0,212,170,.2)",borderRadius:4}}>{safePage} / {totalPages}</span>
+                    <button className="bg" disabled={safePage>=totalPages} onClick={()=>setCurPage(p=>Math.min(totalPages,p+1))} style={{fontSize:11,padding:"6px 12px",opacity:safePage>=totalPages?0.35:1}}>Next ›</button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -814,10 +867,23 @@ function ProductionScheduler({user,onLogout}){
 // ══════════════════════════════════════════════════════════════
 //  DASHBOARD
 // ══════════════════════════════════════════════════════════════
-function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,reload,activeSearch,setActiveSearch}){
-  const overallEffAvg=(()=>{const e=orders.filter(o=>o.status==="Completed"&&o.efficiency!=null).map(o=>o.efficiency);return e.length?Math.round(e.reduce((a,b)=>a+b)/e.length):null;})();
+function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,reload,activeSearch,setActiveSearch,yearStats}){
   const td=new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});
   const toLocalDate=dt=>{if(!dt)return"";return new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});};
+  const curMonth=td.slice(0,7); // YYYY-MM
+
+  // Month stats — from currently loaded orders (already scoped to current month + active)
+  const monthCompleted=orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime).slice(0,7)===curMonth);
+  const monthOrdersCount=orders.filter(o=>toLocalDate(o.start_datetime).slice(0,7)===curMonth).length;
+  const monthEffVals=monthCompleted.filter(o=>o.efficiency!=null).map(o=>o.efficiency);
+  const monthEffAvg=monthEffVals.length?Math.round(monthEffVals.reduce((a,b)=>a+b,0)/monthEffVals.length):null;
+
+  // Year stats — from lightweight Tier 2 summary (loads slightly after dashboard)
+  const yearOrdersCount=yearStats?.orders?.length||0;
+  const yearEffVals=(yearStats?.orders||[]).filter(o=>o.status==="Completed"&&o.efficiency!=null).map(o=>o.efficiency);
+  const yearEffAvg=yearEffVals.length?Math.round(yearEffVals.reduce((a,b)=>a+b,0)/yearEffVals.length):null;
+  const yearLoading=yearStats?.loading;
+
   let todayManMins=0;
   activeOrders.forEach(o=>{const numE=o.num_employees||1;if(!o.is_paused)todayManMins+=((Date.now()-new Date(o.start_datetime)-((o.break_minutes||0)*60000))/60000)*numE;else todayManMins+=(minsTo(o.start_datetime,o.paused_at||nowISO())-(o.break_minutes||0))*numE;});
   orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime)===td).forEach(o=>{todayManMins+=(o.working_minutes||o.actual_minutes||0)*(o.num_employees||1);});
@@ -844,8 +910,10 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
           {label:"TODAY COMPLETED", val:todayDone.length,                          color:"#00D4AA",icon:"✅"},
           {label:"TODAY EFF AVG",   val:todayEffAvg!=null?todayEffAvg+"%":"—",     color:effColor(todayEffAvg),icon:"⚡"},
           {label:"ACTIVE ORDERS",   val:activeOrders.length,                       color:"#FFC107",icon:"🔄"},
-          {label:"TOTAL ORDERS",    val:orders.length,                             color:"#8B90A8",icon:"📊"},
-          {label:"OVERALL EFF AVG", val:overallEffAvg!=null?overallEffAvg+"%":"—", color:effColor(overallEffAvg),icon:"🎯"},
+          {label:"MONTH ORDERS",    val:monthOrdersCount,                          color:"#7B8CFF",icon:"📅"},
+          {label:"YEAR ORDERS",     val:yearLoading?"…":yearOrdersCount.toLocaleString(), color:"#7B8CFF",icon:"📆"},
+          {label:"MONTH EFF AVG",   val:monthEffAvg!=null?monthEffAvg+"%":"—",     color:effColor(monthEffAvg),icon:"📈"},
+          {label:"YEAR EFF AVG",    val:yearLoading?"…":(yearEffAvg!=null?yearEffAvg+"%":"—"), color:effColor(yearEffAvg),icon:"🎯"},
           {label:"TODAY MAN HRS",   val:todayManHrs+"h",                           color:"#FF9500",icon:"👥"},
         ].map(s=>(
           <div key={s.label} className="card" style={{display:"flex",alignItems:"center",gap:12,padding:"13px 15px"}}>
