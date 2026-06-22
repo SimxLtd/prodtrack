@@ -1169,12 +1169,12 @@ function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
     <div className="mo" onClick={e=>e.target===e.currentTarget&&onClose()}>
       <div className="md au" style={{maxWidth:560}}>
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-          <h3 style={{fontSize:14,color:"#FF9500",letterSpacing:1}}>\ud83d\udd50 EDIT ORDER TIMES \u2014 {o.order_number}</h3>
-          <button className="bg" style={{padding:"4px 10px"}} onClick={onClose}>\u2715</button>
+          <h3 style={{fontSize:14,color:"#FF9500",letterSpacing:1}}>🕐 EDIT ORDER TIMES — {o.order_number}</h3>
+          <button className="bg" style={{padding:"4px 10px"}} onClick={onClose}>✕</button>
         </div>
 
         <div style={{background:"rgba(255,149,0,.07)",border:"1px solid rgba(255,149,0,.2)",borderRadius:6,padding:"10px 14px",marginBottom:16,fontSize:11,color:"#FF9500",display:"flex",alignItems:"flex-start",gap:8}}>
-          <span>\u26a0</span><span>Editing times affects efficiency calculation. Use only to correct missed pause/resume actions. This change will be logged.</span>
+          <span>⚠</span><span>Editing times affects efficiency calculation. Use only to correct missed pause/resume actions. This change will be logged.</span>
         </div>
 
         <div className="fg"><label>Start Date & Time</label><input type="datetime-local" value={startDT} onChange={e=>setStartDT(e.target.value)}/></div>
@@ -1184,22 +1184,22 @@ function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
           <input type="datetime-local" value={endDT} onChange={e=>setEndDT(e.target.value)} disabled={o.status!=="Completed"} style={o.status!=="Completed"?{opacity:.4}:{}}/>
         </div>
 
-        <label style={{display:"block",fontSize:11,color:"#8B90A8",marginBottom:8,letterSpacing:1,textTransform:"uppercase"}}>Break Log <span style={{color:"#7B8CFF",fontSize:10,letterSpacing:0,textTransform:"none"}}>\u2014 edit, add, or remove missed breaks</span></label>
+        <label style={{display:"block",fontSize:11,color:"#8B90A8",marginBottom:8,letterSpacing:1,textTransform:"uppercase"}}>Break Log <span style={{color:"#7B8CFF",fontSize:10,letterSpacing:0,textTransform:"none"}}>— edit, add, or remove missed breaks</span></label>
         {breaks.map((b,i)=>(
           <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
             <span style={{color:"#FF9500",fontWeight:700,fontSize:11,width:55,flexShrink:0}}>Break {i+1}</span>
             <input type="datetime-local" value={b.startInput} onChange={e=>updateBreak(i,"startInput",e.target.value)} style={{flex:1,minWidth:150,fontSize:11,padding:"7px 10px",borderColor:"#FF9500"}}/>
-            <span style={{color:"#5A5F78"}}>\u2192</span>
+            <span style={{color:"#5A5F78"}}>→</span>
             <input type="datetime-local" value={b.endInput} onChange={e=>updateBreak(i,"endInput",e.target.value)} style={{flex:1,minWidth:150,fontSize:11,padding:"7px 10px",borderColor:"#FF9500"}}/>
             <span style={{color:"#FF9500",fontSize:11,minWidth:50,textAlign:"right"}}>{Math.round(b.minutes||0)} min</span>
-            <button onClick={()=>removeBreak(i)} style={{background:"none",border:"none",color:"#FF4B6E",cursor:"pointer",fontSize:14,padding:"0 4px"}}>\u2715</button>
+            <button onClick={()=>removeBreak(i)} style={{background:"none",border:"none",color:"#FF4B6E",cursor:"pointer",fontSize:14,padding:"0 4px"}}>✕</button>
           </div>
         ))}
         <button className="bg" onClick={addBreak} style={{fontSize:11,marginBottom:14}}>+ Add Missed Break</button>
 
         <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"#13161F",borderRadius:6,marginBottom:14}}>
           <span style={{fontSize:11,color:"#8B90A8"}}>Recalculated working time:</span>
-          <span style={{fontSize:15,fontWeight:700,color:"#00D4AA"}}>{newWorkMins!=null?fmtMins(newWorkMins):"\u2014 order still active \u2014"}</span>
+          <span style={{fontSize:15,fontWeight:700,color:"#00D4AA"}}>{newWorkMins!=null?fmtMins(newWorkMins):"— order still active —"}</span>
         </div>
         {newEff!=null&&(
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"#13161F",borderRadius:6,marginBottom:14}}>
@@ -1211,12 +1211,12 @@ function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
         <div className="fg"><label>Reason for edit <span style={{color:"#FF4B6E"}}>*required</span></label><input placeholder="e.g. Employee forgot to log lunch break" value={reason} onChange={e=>setReason(e.target.value)}/></div>
 
         <div style={{display:"flex",gap:10,marginTop:8}}>
-          <button className="bp" onClick={handleSave} disabled={saving} style={{flex:1,padding:12}}>{saving?"Saving\u2026":"\u2714 Save Changes"}</button>
+          <button className="bp" onClick={handleSave} disabled={saving} style={{flex:1,padding:12}}>{saving?"Saving…":"✔ Save Changes"}</button>
           <button className="bg" onClick={onClose}>Cancel</button>
         </div>
 
         <div style={{background:"#13161F",border:"1px solid rgba(255,149,0,.2)",borderRadius:6,padding:"10px 14px",fontSize:10,color:"#8B90A8",lineHeight:1.7,marginTop:14}}>
-          \ud83d\udccb <strong style={{color:"#FF9500"}}>Audit trail:</strong> This edit will log who made the change, when, what was changed, and the reason given.
+          📋 <strong style={{color:"#FF9500"}}>Audit trail:</strong> This edit will log who made the change, when, what was changed, and the reason given.
         </div>
       </div>
     </div>
