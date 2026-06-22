@@ -44,6 +44,8 @@ const db = {
   getYearSummary:  (fromISO,toISO) => sbAll("pt_orders",`start_datetime=gte.${fromISO}&start_datetime=lte.${toISO}&select=start_datetime,status,efficiency`),
   addOrder:       (o)     => sb("pt_orders",{method:"POST",body:JSON.stringify(o)}),
   updateOrder:    (id,o)  => sb(`pt_orders?id=eq.${id}`,{method:"PATCH",body:JSON.stringify(o)}),
+  addOrderEdit:   (rec)   => sb("pt_order_edits",{method:"POST",body:JSON.stringify(rec)}),
+  getOrderEdits:  (orderId) => sb(`pt_order_edits?order_id=eq.${orderId}&order=edited_at.desc`),
   searchOrder:    (n)     => sb(`pt_orders?order_number=eq.${encodeURIComponent(n)}`),
   getPlanned:     ()      => sbAll("pt_planned_orders","status=eq.pending&order=scheduled_datetime.asc"),
   getAllPlanned:   ()      => sbAll("pt_planned_orders","order=scheduled_datetime.asc"),
@@ -254,6 +256,7 @@ function ProductionScheduler({user,onLogout}){
   const [sq,setSq]=useState(""); const [sr,setSr]=useState(null); const [snf,setSnf]=useState(false);
   // close modal
   const [cm,setCm]=useState(null); const [cf,setCf]=useState({endQty:"",remarks:""});
+  const [editOrder,setEditOrder]=useState(null);
   // records
   const [fEmp,setFEmp]=useState("All"); const [fLine,setFLine]=useState("All"); const [fStatus,setFStatus]=useState("All"); const [fItem,setFItem]=useState("All"); const [fOrder,setFOrder]=useState(""); const [fItemSearch,setFItemSearch]=useState("");
   const [pageSize,setPageSize]=useState(50); const [curPage,setCurPage]=useState(1);
@@ -385,6 +388,12 @@ function ProductionScheduler({user,onLogout}){
 
   // ── Close order ──
   const openClose=(o)=>{if(o.is_paused){showToast("Resume the order before closing.","error");return;} setCm(o);setCf({endQty:"",remarks:""});};
+  const openEditTimes=(o)=>setEditOrder(o);
+  const handleEditSaved=(updatedOrder)=>{
+    setOrders(p=>p.map(o=>o.id===updatedOrder.id?updatedOrder:o));
+    if(sr?.id===updatedOrder.id) setSr(updatedOrder);
+    setEditOrder(null);
+  };
   const handleClose=async()=>{
     if(!cf.endQty){showToast("Please enter ending quantity.","error");return;}
     setSaving(true);
@@ -506,7 +515,7 @@ function ProductionScheduler({user,onLogout}){
         ):(
           <>
           {/* ═══ DASHBOARD ═══ */}
-          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} reload={loadAll} activeSearch={activeSearch} setActiveSearch={setActiveSearch} yearStats={yearStats}/>}
+          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} onEditTimes={openEditTimes} reload={loadAll} activeSearch={activeSearch} setActiveSearch={setActiveSearch} yearStats={yearStats}/>}
 
           {/* ═══ NEW ORDER ═══ */}
           {view==="new"&&(
@@ -610,7 +619,7 @@ function ProductionScheduler({user,onLogout}){
               </div>
               <div style={{fontSize:10,color:"#5A5F78",marginBottom:16,paddingLeft:2}}>Type an order number and press Search to view full order details, time tracking and break log.</div>
               {snf&&<div className="card" style={{textAlign:"center",color:"#FF4B6E",padding:32,marginBottom:16}}><div style={{fontSize:32,marginBottom:8}}>🚫</div><div>No order found for <strong>"{sq}"</strong></div></div>}
-              {sr&&<div className="au" style={{marginBottom:16}}><OrderCard order={sr} item={items.find(i=>i.id===sr.item_id)} onClose={sr.status==="In Progress"&&!sr.is_paused?()=>openClose(sr):null} onPause={sr.status==="In Progress"&&!sr.is_paused?()=>handlePause(sr):null} onResume={sr.is_paused?()=>handleResume(sr):null}/></div>}
+              {sr&&<div className="au" style={{marginBottom:16}}><OrderCard order={sr} item={items.find(i=>i.id===sr.item_id)} onClose={sr.status==="In Progress"&&!sr.is_paused?()=>openClose(sr):null} onPause={sr.status==="In Progress"&&!sr.is_paused?()=>handlePause(sr):null} onResume={sr.is_paused?()=>handleResume(sr):null} onEditTimes={()=>openEditTimes(sr)} isAdmin={isAdmin}/></div>}
 
               {/* ── Divider ── */}
               <div style={{height:1,background:"#2A2F45",margin:"8px 0 22px"}}/>
@@ -750,7 +759,7 @@ function ProductionScheduler({user,onLogout}){
                           const numEmpO=o.num_employees||1; const manHrs=o.working_minutes?((o.working_minutes*numEmpO)/60).toFixed(2):o.actual_minutes?((o.actual_minutes*numEmpO)/60).toFixed(2):null;
                           return(
                             <tr key={o.id} style={{borderBottom:"1px solid #1E2135"}}>
-                              <td style={{padding:"8px 10px",color:"#00D4AA",fontWeight:600,whiteSpace:"nowrap"}}>{o.order_number}</td>
+                              <td style={{padding:"8px 10px",color:"#00D4AA",fontWeight:600,whiteSpace:"nowrap"}}>{o.order_number}{o.was_edited&&<span style={{marginLeft:6,fontSize:8,fontWeight:700,color:"#FF9500",background:"rgba(255,149,0,.1)",border:"1px solid rgba(255,149,0,.2)",padding:"1px 6px",borderRadius:8}}>✎</span>}</td>
                               <td style={{padding:"8px 10px",color:"#C8CADC",maxWidth:150}}>
                                 <div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{o.employees?.join(", ")||o.employee}</div>
                                 {(o.num_employees||1)>1&&<div style={{fontSize:10,color:"#FF9500"}}>👥 {o.num_employees}</div>}
@@ -789,8 +798,11 @@ function ProductionScheduler({user,onLogout}){
                               </td>
                               <td style={{padding:"8px 10px",color:"#8B90A8",fontSize:11}}><div style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:120}}>{o.remarks||"—"}</div></td>
                               <td style={{padding:"8px 10px"}}>
-                                {o.status==="In Progress"&&!o.is_paused&&<button className="bd" style={{fontSize:11,padding:"4px 10px"}} onClick={()=>openClose(o)}>⏹ End</button>}
-                                {o.is_paused&&<span style={{fontSize:10,color:"#FF9500"}}>On Break</span>}
+                                <div style={{display:"flex",gap:5,alignItems:"center"}}>
+                                  {isAdmin&&<button onClick={()=>openEditTimes(o)} style={{background:"rgba(255,149,0,.1)",color:"#FF9500",border:"1px solid rgba(255,149,0,.3)",padding:"4px 9px",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:10,cursor:"pointer",borderRadius:4,whiteSpace:"nowrap"}}>🕐 Edit</button>}
+                                  {o.status==="In Progress"&&!o.is_paused&&<button className="bd" style={{fontSize:11,padding:"4px 10px"}} onClick={()=>openClose(o)}>⏹ End</button>}
+                                  {o.is_paused&&<span style={{fontSize:10,color:"#FF9500"}}>On Break</span>}
+                                </div>
                               </td>
                             </tr>
                           );
@@ -854,6 +866,18 @@ function ProductionScheduler({user,onLogout}){
         </div>
       )}
 
+      {/* EDIT TIMES MODAL (Admin only) */}
+      {editOrder&&(
+        <EditTimesModal
+          order={editOrder}
+          item={items.find(i=>i.id===editOrder.item_id)}
+          user={user}
+          onSaved={handleEditSaved}
+          onClose={()=>setEditOrder(null)}
+          showToast={showToast}
+        />
+      )}
+
       {/* TOAST */}
       {toast&&(
         <div className="ti" style={{position:"fixed",bottom:24,right:24,background:toast.type==="error"?"#FF4B6E":toast.type==="warn"?"#FF9500":"#00D4AA",color:toast.type==="error"?"#fff":"#0F1117",padding:"12px 20px",borderRadius:6,fontSize:13,fontWeight:600,boxShadow:"0 8px 32px rgba(0,0,0,.4)",zIndex:300,maxWidth:420}}>
@@ -867,7 +891,7 @@ function ProductionScheduler({user,onLogout}){
 // ══════════════════════════════════════════════════════════════
 //  DASHBOARD
 // ══════════════════════════════════════════════════════════════
-function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,reload,activeSearch,setActiveSearch,yearStats}){
+function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,onEditTimes,reload,activeSearch,setActiveSearch,yearStats}){
   const td=new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});
   const toLocalDate=dt=>{if(!dt)return"";return new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});};
   const curMonth=td.slice(0,7); // YYYY-MM
@@ -904,7 +928,7 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
   return(
     <div className="au">
       {/* KPI */}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:12,marginBottom:20}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(100px,1fr))",gap:8,marginBottom:20}}>
         {[
           {label:"TODAY STARTED",   val:todayOrders.length,                        color:"#7B8CFF",icon:"📋"},
           {label:"TODAY COMPLETED", val:todayDone.length,                          color:"#00D4AA",icon:"✅"},
@@ -916,9 +940,10 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
           {label:"YEAR EFF AVG",    val:yearLoading?"…":(yearEffAvg!=null?yearEffAvg+"%":"—"), color:effColor(yearEffAvg),icon:"🎯"},
           {label:"TODAY MAN HRS",   val:todayManHrs+"h",                           color:"#FF9500",icon:"👥"},
         ].map(s=>(
-          <div key={s.label} className="card" style={{display:"flex",alignItems:"center",gap:12,padding:"13px 15px"}}>
-            <div style={{fontSize:22}}>{s.icon}</div>
-            <div><div style={{fontSize:20,fontWeight:700,color:s.color,lineHeight:1}}>{s.val}</div><div style={{fontSize:8,color:"#5A5F78",letterSpacing:1.5,marginTop:3,textTransform:"uppercase"}}>{s.label}</div></div>
+          <div key={s.label} className="card" style={{display:"flex",flexDirection:"column",alignItems:"flex-start",gap:4,padding:"10px 11px",minWidth:0}}>
+            <div style={{fontSize:15}}>{s.icon}</div>
+            <div style={{fontSize:16,fontWeight:700,color:s.color,lineHeight:1,whiteSpace:"nowrap"}}>{s.val}</div>
+            <div style={{fontSize:7,color:"#5A5F78",letterSpacing:0.8,textTransform:"uppercase",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",width:"100%"}}>{s.label}</div>
           </div>
         ))}
       </div>
@@ -993,6 +1018,8 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
                 onClose={!o.is_paused?()=>onClose(o):null}
                 onPause={!o.is_paused?()=>onPause(o):null}
                 onResume={o.is_paused?()=>onResume(o):null}
+                onEditTimes={()=>onEditTimes(o)}
+                isAdmin={isAdmin}
                 highlight={!!isMatch}
               />
             </div>
@@ -1006,7 +1033,7 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
 // ══════════════════════════════════════════════════════════════
 //  ORDER CARD
 // ══════════════════════════════════════════════════════════════
-function OrderCard({order:o,item,onClose,onPause,onResume}){
+function OrderCard({order:o,item,onClose,onPause,onResume,onEditTimes,isAdmin}){
   const isPaused=o.is_paused;
   const statusLabel=isPaused?"On Break":o.status;
   const sc=STATUS_COLORS[statusLabel]||{dot:"#6C757D",bg:""};
@@ -1025,8 +1052,10 @@ function OrderCard({order:o,item,onClose,onPause,onResume}){
             {statusLabel}
           </span>
           {o.efficiency!=null&&<span style={{fontSize:11,fontWeight:700,color:effColor(o.efficiency)}}>⚡ {o.efficiency}%</span>}
+          {o.was_edited&&<span style={{fontSize:9,fontWeight:700,color:"#FF9500",background:"rgba(255,149,0,.1)",border:"1px solid rgba(255,149,0,.2)",padding:"2px 8px",borderRadius:10}}>✎ Edited</span>}
         </div>
         <div style={{display:"flex",gap:6}}>
+          {isAdmin&&onEditTimes&&<button onClick={onEditTimes} style={{background:"rgba(255,149,0,.1)",color:"#FF9500",border:"1px solid rgba(255,149,0,.3)",padding:"6px 12px",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:11,cursor:"pointer",borderRadius:4}}>🕐 Edit Times</button>}
           {onResume&&<button className="bresume" onClick={onResume}>▶ Resume</button>}
           {onPause&&<button className="bpause" onClick={onPause}>⏸ Break</button>}
           {onClose&&<button className="bd" onClick={onClose} style={{fontSize:11,padding:"6px 12px"}}>⏹ End</button>}
@@ -1083,6 +1112,117 @@ function OrderCard({order:o,item,onClose,onPause,onResume}){
 // ══════════════════════════════════════════════════════════════
 //  EMPLOYEE PICKER
 // ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
+//  EDIT TIMES MODAL (Admin only)
+// ══════════════════════════════════════════════════════════════
+function toLocalInput(dt){ if(!dt) return ""; return new Date(dt).toLocaleString("sv",{timeZone:NZ_TZ}).slice(0,16).replace(" ","T"); }
+
+function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
+  const [startDT,setStartDT]=useState(toLocalInput(o.start_datetime));
+  const [endDT,setEndDT]=useState(o.end_datetime?toLocalInput(o.end_datetime):"");
+  const [breaks,setBreaks]=useState((o.breaks||[]).map(b=>({...b,startInput:toLocalInput(b.start),endInput:toLocalInput(b.end)})));
+  const [reason,setReason]=useState("");
+  const [saving,setSaving]=useState(false);
+
+  const addBreak=()=>setBreaks(p=>[...p,{startInput:startDT,endInput:startDT,minutes:0}]);
+  const removeBreak=i=>setBreaks(p=>p.filter((_,idx)=>idx!==i));
+  const updateBreak=(i,field,val)=>setBreaks(p=>p.map((b,idx)=>{
+    if(idx!==i) return b;
+    const nb={...b,[field]:val};
+    if(nb.startInput&&nb.endInput) nb.minutes=Math.max(0,Math.round((new Date(nb.endInput)-new Date(nb.startInput))/60000));
+    return nb;
+  }));
+
+  const totalBreakMins=breaks.reduce((a,b)=>a+(b.minutes||0),0);
+  const totalElapsed=endDT?Math.max(0,(new Date(endDT)-new Date(startDT))/60000):null;
+  const newWorkMins=totalElapsed!=null?Math.max(0,totalElapsed-totalBreakMins):null;
+  const newEff=newWorkMins!=null?calcEff(item?.std_minutes,o.end_qty,newWorkMins,o.num_employees||1):null;
+
+  const handleSave=async()=>{
+    if(!reason.trim()){showToast("Please provide a reason for this edit.","error");return;}
+    setSaving(true);
+    try{
+      const beforeData={start_datetime:o.start_datetime,end_datetime:o.end_datetime,breaks:o.breaks,break_minutes:o.break_minutes,working_minutes:o.working_minutes,actual_minutes:o.actual_minutes,efficiency:o.efficiency};
+      const newBreaksArr=breaks.map(b=>({start:new Date(b.startInput).toISOString(),end:new Date(b.endInput).toISOString(),minutes:b.minutes}));
+      const patch={
+        start_datetime:new Date(startDT).toISOString(),
+        breaks:newBreaksArr,
+        break_minutes:totalBreakMins,
+        was_edited:true,
+      };
+      if(o.status==="Completed"&&endDT){
+        patch.end_datetime=new Date(endDT).toISOString();
+        patch.actual_minutes=Math.round(totalElapsed*10)/10;
+        patch.working_minutes=Math.round(newWorkMins*10)/10;
+        patch.efficiency=newEff;
+      }
+      await db.updateOrder(o.id,patch);
+      const afterData={...patch};
+      await db.addOrderEdit({order_id:o.id,order_number:o.order_number,edited_by:user.username,reason:reason.trim(),before_data:beforeData,after_data:afterData});
+      showToast(`Order ${o.order_number} times updated.`);
+      onSaved({...o,...patch});
+    }catch(e){showToast("Failed to save: "+e.message,"error");}
+    setSaving(false);
+  };
+
+  return(
+    <div className="mo" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="md au" style={{maxWidth:560}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
+          <h3 style={{fontSize:14,color:"#FF9500",letterSpacing:1}}>\ud83d\udd50 EDIT ORDER TIMES \u2014 {o.order_number}</h3>
+          <button className="bg" style={{padding:"4px 10px"}} onClick={onClose}>\u2715</button>
+        </div>
+
+        <div style={{background:"rgba(255,149,0,.07)",border:"1px solid rgba(255,149,0,.2)",borderRadius:6,padding:"10px 14px",marginBottom:16,fontSize:11,color:"#FF9500",display:"flex",alignItems:"flex-start",gap:8}}>
+          <span>\u26a0</span><span>Editing times affects efficiency calculation. Use only to correct missed pause/resume actions. This change will be logged.</span>
+        </div>
+
+        <div className="fg"><label>Start Date & Time</label><input type="datetime-local" value={startDT} onChange={e=>setStartDT(e.target.value)}/></div>
+
+        <div className="fg">
+          <label>End Date & Time {o.status!=="Completed"&&<span style={{color:"#5A5F78",fontSize:10,letterSpacing:0}}>(only editable for completed orders)</span>}</label>
+          <input type="datetime-local" value={endDT} onChange={e=>setEndDT(e.target.value)} disabled={o.status!=="Completed"} style={o.status!=="Completed"?{opacity:.4}:{}}/>
+        </div>
+
+        <label style={{display:"block",fontSize:11,color:"#8B90A8",marginBottom:8,letterSpacing:1,textTransform:"uppercase"}}>Break Log <span style={{color:"#7B8CFF",fontSize:10,letterSpacing:0,textTransform:"none"}}>\u2014 edit, add, or remove missed breaks</span></label>
+        {breaks.map((b,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+            <span style={{color:"#FF9500",fontWeight:700,fontSize:11,width:55,flexShrink:0}}>Break {i+1}</span>
+            <input type="datetime-local" value={b.startInput} onChange={e=>updateBreak(i,"startInput",e.target.value)} style={{flex:1,minWidth:150,fontSize:11,padding:"7px 10px",borderColor:"#FF9500"}}/>
+            <span style={{color:"#5A5F78"}}>\u2192</span>
+            <input type="datetime-local" value={b.endInput} onChange={e=>updateBreak(i,"endInput",e.target.value)} style={{flex:1,minWidth:150,fontSize:11,padding:"7px 10px",borderColor:"#FF9500"}}/>
+            <span style={{color:"#FF9500",fontSize:11,minWidth:50,textAlign:"right"}}>{Math.round(b.minutes||0)} min</span>
+            <button onClick={()=>removeBreak(i)} style={{background:"none",border:"none",color:"#FF4B6E",cursor:"pointer",fontSize:14,padding:"0 4px"}}>\u2715</button>
+          </div>
+        ))}
+        <button className="bg" onClick={addBreak} style={{fontSize:11,marginBottom:14}}>+ Add Missed Break</button>
+
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"#13161F",borderRadius:6,marginBottom:14}}>
+          <span style={{fontSize:11,color:"#8B90A8"}}>Recalculated working time:</span>
+          <span style={{fontSize:15,fontWeight:700,color:"#00D4AA"}}>{newWorkMins!=null?fmtMins(newWorkMins):"\u2014 order still active \u2014"}</span>
+        </div>
+        {newEff!=null&&(
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"#13161F",borderRadius:6,marginBottom:14}}>
+            <span style={{fontSize:11,color:"#8B90A8"}}>Recalculated efficiency:</span>
+            <span style={{fontSize:15,fontWeight:700,color:effColor(newEff)}}>{newEff}%</span>
+          </div>
+        )}
+
+        <div className="fg"><label>Reason for edit <span style={{color:"#FF4B6E"}}>*required</span></label><input placeholder="e.g. Employee forgot to log lunch break" value={reason} onChange={e=>setReason(e.target.value)}/></div>
+
+        <div style={{display:"flex",gap:10,marginTop:8}}>
+          <button className="bp" onClick={handleSave} disabled={saving} style={{flex:1,padding:12}}>{saving?"Saving\u2026":"\u2714 Save Changes"}</button>
+          <button className="bg" onClick={onClose}>Cancel</button>
+        </div>
+
+        <div style={{background:"#13161F",border:"1px solid rgba(255,149,0,.2)",borderRadius:6,padding:"10px 14px",fontSize:10,color:"#8B90A8",lineHeight:1.7,marginTop:14}}>
+          \ud83d\udccb <strong style={{color:"#FF9500"}}>Audit trail:</strong> This edit will log who made the change, when, what was changed, and the reason given.
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EmployeePicker({employees,selected,onChange}){
   const [q,setQ]=useState("");
   const filtered=q.trim()?employees.filter(e=>e.toLowerCase().includes(q.toLowerCase())):employees;
