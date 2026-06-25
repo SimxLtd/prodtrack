@@ -443,13 +443,14 @@ function ProductionScheduler({user,onLogout}){
   useEffect(()=>{setCurPage(1);},[fEmp,fLine,fStatus,fItem,fOrder,fFrom,fTo,pageSize]);
 
   const exportCSV=()=>{
-    const H=["Order #","Employees","Num Emp","Line ID","Line","Item ID","Item","Std Min","Plan Qty","End Qty","Total Min","Break Min","Working Min","Man Hrs","Efficiency %","Start","End","Duration","Status","Remarks"];
+    const H=["Order #","Employees","Num Emp","Line ID","Line","Item ID","Item","Std Min","Plan Qty","End Qty","Total Min","Break Min","Working Min","Actual Min/Pc","Man Hrs","Efficiency %","Start","End","Duration","Status","Remarks"];
     const R=filteredOrders.map(o=>[
       o.order_number,o.employees?.join("; ")||o.employee,o.num_employees||1,
       o.line_id,o.line_name,o.item_id,o.item_name,
       items.find(i=>i.id===o.item_id)?.std_minutes??"",
       o.production_qty,o.end_qty??"",
       o.actual_minutes??"",o.break_minutes??"",o.working_minutes??"",
+      (o.working_minutes!=null&&o.end_qty>0)?(((o.working_minutes*(o.num_employees||1))/o.end_qty).toFixed(2)):"",
       o.working_minutes?(((o.working_minutes*(o.num_employees||1))/60).toFixed(2)):"",
       o.efficiency??"",
       o.start_datetime?new Date(o.start_datetime).toLocaleString("en-NZ",{timeZone:NZ_TZ}):"",
@@ -742,7 +743,7 @@ function ProductionScheduler({user,onLogout}){
                     <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
                       <thead>
                         <tr style={{borderBottom:"1px solid #2A2F45"}}>
-                          {[["Order #","order_number"],["Employees","employee"],["Line","line_id"],["Item","item_id"],["Plan Qty","production_qty"],["End Qty","end_qty"],["Std Min",null],["Total Min","actual_minutes"],["Break Min","break_minutes"],["Work Min","working_minutes"],["Man Hrs",null],["Efficiency","efficiency"],["Start","start_datetime"],["End","end_datetime"],["Duration",null],["Status","status"],["Remarks",null],["Action",null]].map(([h,f])=>(
+                          {[["Order #","order_number"],["Employees","employee"],["Line","line_id"],["Item","item_id"],["Plan Qty","production_qty"],["End Qty","end_qty"],["Std Min",null],["Total Min","actual_minutes"],["Break Min","break_minutes"],["Work Min","working_minutes"],["Actual Min/Pc",null],["Man Hrs",null],["Efficiency","efficiency"],["Start","start_datetime"],["End","end_datetime"],["Duration",null],["Status","status"],["Remarks",null],["Action",null]].map(([h,f])=>(
                             <th key={h} className={f?"sortable":""} onClick={f?()=>handleSort(f):undefined}
                               style={{padding:"9px 10px",textAlign:"left",color:sortF===f?"#00D4AA":"#5A5F78",letterSpacing:1,fontWeight:600,fontSize:10,textTransform:"uppercase",whiteSpace:"nowrap"}}>
                               {h}{f&&<span style={{marginLeft:3,opacity:.6}}>{sortF===f?(sortD==="asc"?"↑":"↓"):"↕"}</span>}
@@ -778,6 +779,18 @@ function ProductionScheduler({user,onLogout}){
                               <td style={{padding:"8px 10px",textAlign:"center",color:"#C8CADC"}}>{o.actual_minutes!=null?Math.round(o.actual_minutes):<span style={{color:"#4A4F65"}}>—</span>}</td>
                               <td style={{padding:"8px 10px",textAlign:"center",color:"#FF9500"}}>{o.break_minutes?Math.round(o.break_minutes):<span style={{color:"#4A4F65"}}>0</span>}</td>
                               <td style={{padding:"8px 10px",textAlign:"center",color:"#00D4AA"}}>{o.working_minutes!=null?Math.round(o.working_minutes):<span style={{color:"#4A4F65"}}>—</span>}</td>
+                              <td style={{padding:"8px 10px",textAlign:"center"}}>
+                                {(()=>{
+                                  if(o.working_minutes==null||!o.end_qty||o.end_qty<=0) return <span style={{color:"#4A4F65"}}>—</span>;
+                                  const actualMinPc=(o.working_minutes*(o.num_employees||1))/o.end_qty;
+                                  let color="#C8CADC";
+                                  if(stdMin){
+                                    const ratio=actualMinPc/stdMin;
+                                    color=ratio<=1?"#00D4AA":ratio<=1.3?"#FFC107":"#FF4B6E";
+                                  }
+                                  return <span style={{color,fontWeight:700}}>{actualMinPc.toFixed(2)}</span>;
+                                })()}
+                              </td>
                               <td style={{padding:"8px 10px",textAlign:"center",color:"#FF9500"}}>{manHrs?manHrs+"h":<span style={{color:"#4A4F65"}}>—</span>}</td>
                               <td style={{padding:"8px 10px",textAlign:"center"}}>
                                 {eff!=null?(
