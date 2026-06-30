@@ -261,6 +261,8 @@ function ProductionScheduler({user,onLogout}){
   const [fEmp,setFEmp]=useState("All"); const [fLine,setFLine]=useState("All"); const [fStatus,setFStatus]=useState("All"); const [fItem,setFItem]=useState("All"); const [fOrder,setFOrder]=useState(""); const [fItemSearch,setFItemSearch]=useState("");
   const [pageSize,setPageSize]=useState(50); const [curPage,setCurPage]=useState(1);
   const [fFrom,setFFrom]=useState(()=>new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"})); const [fTo,setFTo]=useState(()=>new Date().toLocaleDateString("en-CA",{timeZone:"Pacific/Auckland"}));
+  const [allOrders,setAllOrders]=useState(null); // null = not yet fetched, array = fetched all
+  const [recordsLoading,setRecordsLoading]=useState(false);
   const [sortF,setSortF]=useState("created_at"); const [sortD,setSortD]=useState("desc");
 
   const showToast=(msg,type="success")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
@@ -417,7 +419,8 @@ function ProductionScheduler({user,onLogout}){
 
   // ── Records ──
   const toNZDate=dt=>{if(!dt)return"";return new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});};
-  const filteredOrders=orders
+  const recordsSource=allOrders??orders;
+  const filteredOrders=recordsSource
     .filter(o=>{
       const em=fEmp==="All"||o.employee===fEmp||(o.employees&&o.employees.includes(fEmp));
       const lm=fLine==="All"||o.line_id===fLine;
@@ -641,7 +644,7 @@ function ProductionScheduler({user,onLogout}){
             <div className="au">
               <div style={{background:"#13161F",border:"1px solid #2A2F45",borderRadius:8,padding:"14px 16px",marginBottom:14}}>
                 <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
-                  <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>Records <span style={{color:"#4A4F65"}}>({filteredOrders.length})</span></h2>
+                  <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>Records <span style={{color:"#4A4F65"}}>({filteredOrders.length})</span>{recordsLoading&&<span style={{marginLeft:8,fontSize:10,color:"#7B8CFF",fontWeight:700,background:"rgba(123,140,255,.1)",border:"1px solid rgba(123,140,255,.2)",padding:"2px 8px",borderRadius:8}}>⟳ Loading…</span>}</h2>
                   <div style={{display:"flex",gap:8}}><button className="bg" style={{fontSize:11}} onClick={loadAll}>↻</button><button className="bp" style={{fontSize:12,padding:"8px 16px"}} onClick={exportCSV}>⬇ Export CSV</button></div>
                 </div>
                 <div style={{display:"flex",alignItems:"flex-end",gap:10,flexWrap:"wrap"}}>
@@ -732,7 +735,14 @@ function ProductionScheduler({user,onLogout}){
                         onClick={()=>{setFFrom(t);setFTo(t);}}>Today</button>
                     );})()}
                     <button className="bg" style={{whiteSpace:"nowrap",fontSize:11,padding:"9px 14px"}}
-                      onClick={()=>{setFEmp("All");setFLine("All");setFStatus("All");setFItem("All");setFOrder("");setFItemSearch("");setFFrom("");setFTo("");setSortF("created_at");setSortD("desc");}}>✕ Clear All</button>
+                      onClick={async()=>{
+                        setFEmp("All");setFLine("All");setFStatus("All");setFItem("All");setFOrder("");setFItemSearch("");setFFrom("");setFTo("");setSortF("created_at");setSortD("desc");
+                        if(!allOrders){
+                          setRecordsLoading(true);
+                          try{const all=await db.getOrders();setAllOrders(all);}catch(e){showToast("Failed to load all records: "+e.message,"error");}
+                          setRecordsLoading(false);
+                        }
+                      }}>✕ Clear All</button>
                   </div>
                 </div>
               </div>
@@ -1719,6 +1729,10 @@ function MonthlyTracker({orders,items}){
   const effInst=useRef(null); const barInst=useRef(null);
   const [chartReady,setChartReady] = useState(false);
 
+  // Past-month fetch cache: key = "YYYY-MM" → orders array
+  const [monthCache,setMonthCache] = useState({});
+  const [monthLoading,setMonthLoading] = useState(false);
+
   const toNZ = dt => !dt?"":new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});
   const todayStr = curNZDate;
   const isCurrentMonth = selYear===curNZYear && selMonth===curNZMonth;
@@ -1726,7 +1740,7 @@ function MonthlyTracker({orders,items}){
   const prevMonth=()=>{ if(selMonth===0){setSelMonth(11);setSelYear(y=>y-1);}else setSelMonth(m=>m-1); };
   const nextMonth=()=>{
     const isLast=selYear===curNZYear&&selMonth===curNZMonth;
-    if(isLast) return; // can't go to future months
+    if(isLast) return;
     if(selMonth===11){setSelMonth(0);setSelYear(y=>y+1);}else setSelMonth(m=>m+1);
   };
   const goCurrentMonth=()=>{ setSelYear(curNZYear); setSelMonth(curNZMonth); };
@@ -1734,6 +1748,30 @@ function MonthlyTracker({orders,items}){
   const monthStr=String(selMonth+1).padStart(2,"0");
   const daysInMonth=new Date(selYear,selMonth+1,0).getDate();
   const monthName=new Date(selYear,selMonth,1).toLocaleDateString("en-NZ",{month:"long",year:"numeric"});
+  const cacheKey=`${selYear}-${monthStr}`;
+
+  // Fetch past month if not current and not already cached
+  useEffect(()=>{
+    if(isCurrentMonth) return;
+    if(monthCache[cacheKey]) return;
+    let cancelled=false;
+    const fetch=async()=>{
+      setMonthLoading(true);
+      try{
+        const lastDay=new Date(selYear,selMonth+1,0).getDate();
+        const from=`${selYear}-${monthStr}-01T00:00:00`;
+        const to=`${selYear}-${monthStr}-${String(lastDay).padStart(2,"0")}T23:59:59`;
+        const data=await db.getMonthOrders(from,to);
+        if(!cancelled) setMonthCache(p=>({...p,[cacheKey]:data}));
+      }catch(e){ console.error("MonthlyTracker fetch error:",e); }
+      if(!cancelled) setMonthLoading(false);
+    };
+    fetch();
+    return()=>{ cancelled=true; };
+  },[selYear,selMonth,isCurrentMonth,cacheKey]);
+
+  // Use cached data for past months, live orders for current month
+  const activeOrders = isCurrentMonth ? orders : (monthCache[cacheKey]||[]);
 
   // Build daily data
   const dayData=[];
@@ -1743,7 +1781,7 @@ function MonthlyTracker({orders,items}){
     const label=`${String(d).padStart(2,"0")} ${new Date(dateStr+"T12:00:00").toLocaleDateString("en-NZ",{month:"short"})}`;
     const dayName=new Date(dateStr+"T12:00:00").toLocaleDateString("en-NZ",{weekday:"short"});
     if(isFuture){ dayData.push({dateStr,label,dayName,completed:0,pieces:0,avgEff:null,avgWorkMin:null,manHrs:null,hasData:false,isFuture:true}); continue; }
-    const dayOrders=orders.filter(o=>o.status==="Completed"&&toNZ(o.start_datetime)===dateStr);
+    const dayOrders=activeOrders.filter(o=>o.status==="Completed"&&toNZ(o.start_datetime)===dateStr);
     if(dayOrders.length===0){ dayData.push({dateStr,label,dayName,completed:0,pieces:0,avgEff:null,avgWorkMin:null,manHrs:null,hasData:false,isFuture:false}); continue; }
     const effs=dayOrders.filter(o=>o.efficiency!=null).map(o=>o.efficiency);
     const avgEff=effs.length?Math.round(effs.reduce((a,b)=>a+b)/effs.length):null;
@@ -1885,6 +1923,7 @@ function MonthlyTracker({orders,items}){
               Current Month
             </button>
           )}
+          {monthLoading&&<span style={{fontSize:10,color:"#7B8CFF",fontWeight:700,background:"rgba(123,140,255,.1)",border:"1px solid rgba(123,140,255,.2)",padding:"4px 10px",borderRadius:8}}>⟳ Loading…</span>}
           {/* View toggle — radio style */}
           <div style={{display:"flex",background:"#13161F",border:"1px solid #2A2F45",borderRadius:6,overflow:"hidden"}}>
             {[["chart","📊 Chart"],["table","📋 Table"]].map(([v,lbl],i)=>(
@@ -2008,6 +2047,10 @@ function EmployeeEfficiency({orders,employees}){
   const [selYear,setSelYear]   = useState(curNZYear);
   const [selMonth,setSelMonth] = useState(curNZMonth);
 
+  // Past-month fetch cache
+  const [monthCache,setMonthCache] = useState({});
+  const [monthLoading,setMonthLoading] = useState(false);
+
   const isCurrentMonth = selYear===curNZYear && selMonth===curNZMonth;
   const prevMonth=()=>{ if(selMonth===0){setSelMonth(11);setSelYear(y=>y-1);}else setSelMonth(m=>m-1); };
   const nextMonth=()=>{ if(isCurrentMonth) return; if(selMonth===11){setSelMonth(0);setSelYear(y=>y+1);}else setSelMonth(m=>m+1); };
@@ -2016,9 +2059,33 @@ function EmployeeEfficiency({orders,employees}){
   const monthStr=String(selMonth+1).padStart(2,"0");
   const monthName=new Date(selYear,selMonth,1).toLocaleDateString("en-NZ",{month:"long",year:"numeric"});
   const toNZ = dt => !dt?"":new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+  const cacheKey=`${selYear}-${monthStr}`;
 
-  // Orders this employee worked on (solo or with others) within the selected month, completed only
-  const empOrders = selEmp ? orders.filter(o=>{
+  // Fetch past month on demand
+  useEffect(()=>{
+    if(isCurrentMonth) return;
+    if(monthCache[cacheKey]) return;
+    let cancelled=false;
+    const fetch=async()=>{
+      setMonthLoading(true);
+      try{
+        const lastDay=new Date(selYear,selMonth+1,0).getDate();
+        const from=`${selYear}-${monthStr}-01T00:00:00`;
+        const to=`${selYear}-${monthStr}-${String(lastDay).padStart(2,"0")}T23:59:59`;
+        const data=await db.getMonthOrders(from,to);
+        if(!cancelled) setMonthCache(p=>({...p,[cacheKey]:data}));
+      }catch(e){ console.error("EmpEff fetch error:",e); }
+      if(!cancelled) setMonthLoading(false);
+    };
+    fetch();
+    return()=>{ cancelled=true; };
+  },[selYear,selMonth,isCurrentMonth,cacheKey]);
+
+  // Use cached or live orders
+  const activeOrders = isCurrentMonth ? orders : (monthCache[cacheKey]||[]);
+
+  // Orders this employee worked on within the selected month, completed only
+  const empOrders = selEmp ? activeOrders.filter(o=>{
     if(o.status!=="Completed") return false;
     if(!(o.employees||[o.employee]).includes(selEmp)) return false;
     const od=toNZ(o.start_datetime);
@@ -2064,6 +2131,7 @@ function EmployeeEfficiency({orders,employees}){
               Current Month
             </button>
           )}
+          {monthLoading&&<span style={{fontSize:10,color:"#7B8CFF",fontWeight:700,background:"rgba(123,140,255,.1)",border:"1px solid rgba(123,140,255,.2)",padding:"4px 10px",borderRadius:8}}>⟳ Loading…</span>}
         </div>
       </div>
 
