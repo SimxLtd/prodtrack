@@ -494,18 +494,28 @@ function ProductionScheduler({user,onLogout}){
     return()=>clearInterval(interval);
   },[]);
 
-  // ── Today midnight NZ time in ms — used to clamp active order man-hours ──
+  // ── Today midnight NZ time in ms ──
+  // Most reliable: toLocaleString with sv locale gives "YYYY-MM-DD HH:MM:SS" in NZ time
   const todayMidnightMs=(()=>{
-    // Get today's date string in NZ timezone e.g. "2026-07-01"
-    const nzDateStr=new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});
-    // Find what UTC ms corresponds to midnight NZ by binary-searching the offset
-    // Simpler: use Intl.DateTimeFormat to get the NZ offset directly
-    const probe=new Date(nzDateStr+"T00:00:00Z");
-    const nzHour=Number(new Intl.DateTimeFormat("en-AU",{timeZone:NZ_TZ,hour:"numeric",hour12:false}).format(probe));
-    // nzHour at UTC midnight tells us offset: if NZ is UTC+12, nzHour=12
-    // midnight NZ = UTC midnight minus that offset in hours
-    const offsetMs=nzHour*3600000;
-    return probe.getTime()-offsetMs;
+    try{
+      const now=new Date();
+      // Get NZ local date string e.g. "2026-07-01"
+      const nzDate=now.toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+      // Get full NZ datetime to find offset — sv locale gives sortable ISO-like string
+      const nzFull=now.toLocaleString("sv",{timeZone:NZ_TZ}); // "2026-07-01 10:30:00"
+      const nzNow=new Date(nzFull.replace(" ","T")+"Z"); // treat as UTC to get ms offset
+      const utcNow=now.getTime();
+      const diff=nzNow.getTime()-utcNow; // NZ offset in ms (positive = ahead)
+      // midnight NZ in UTC ms = UTC midnight of NZ date minus offset correction
+      const [y,mo,d]=nzDate.split("-").map(Number);
+      const utcMidnight=Date.UTC(y,mo-1,d);
+      // NZ midnight = utcMidnight adjusted by offset
+      return utcMidnight-diff;
+    }catch(e){
+      // Fallback: approximate midnight as start of today UTC (safe for same-day orders)
+      const now=new Date();
+      return Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate());
+    }
   })();
   const todayDone=todayOrders.filter(o=>o.status==="Completed");
   const todayEffAvg=(()=>{const e=todayDone.filter(o=>o.efficiency!=null).map(o=>o.efficiency);return e.length?Math.round(e.reduce((a,b)=>a+b)/e.length):null;})();
@@ -2429,7 +2439,7 @@ function EfficiencyPie({orders}){
     hole.setAttribute("cx",cx);hole.setAttribute("cy",cy);hole.setAttribute("r",r-1);
     hole.setAttribute("fill","#1A1D27");
     svg.appendChild(hole);
-  },[banded,total]);
+  },[total,selYear,selMonth,view,monthCache,isCurrentMonth]);
 
   const fmtNum=n=>n>=1000?(n/1000).toFixed(1)+"k":String(n);
 
