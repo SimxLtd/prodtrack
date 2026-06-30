@@ -472,60 +472,40 @@ function ProductionScheduler({user,onLogout}){
   const toLocalDate=dt=>{if(!dt)return"";return new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});};
   // Helper: is this order assigned to the current user?
   const isMine=o=>(o.employees||[o.employee]).includes(user.full_name);
-  // Active orders
-  const activeOrders=orders.filter(o=>o.status==="In Progress"||o.status==="On Break");
-  // Worker sees only their own active orders; admin sees all
+  // Active orders — status is "In Progress" for both running and paused orders
+  const activeOrders=orders.filter(o=>o.status==="In Progress");
+  // Worker sees all active orders same as admin
   const myActiveOrders=activeOrders;
-  // Today's orders by local start date — ALL employees for both admin and worker
+  // Today's orders by local start date
   const todayOrders=orders.filter(o=>toLocalDate(o.start_datetime)===td);
 
   // ── Auto-refresh active orders every 30s ──
   useEffect(()=>{
     const interval=setInterval(async()=>{
-      if(document.hidden) return; // pause when tab not visible
+      if(document.hidden)return;
       try{
         const fresh=await db.getActiveOrders();
         setOrders(prev=>{
-          // Merge: keep completed/historical orders, replace active ones with fresh data
-          const freshIds=new Set(fresh.map(o=>o.id));
-          const nonActive=prev.filter(o=>o.status!=="In Progress"&&o.status!=="On Break");
-          const stillActive=prev.filter(o=>o.status==="In Progress"||o.status==="On Break");
-          // Add any new active orders not in prev
-          const merged=[...nonActive,...fresh];
-          return merged;
+          const nonActive=prev.filter(o=>o.status!=="In Progress");
+          return [...nonActive,...fresh];
         });
-      }catch(e){ console.warn("Auto-refresh failed:",e.message); }
+      }catch(e){console.warn("Auto-refresh failed:",e.message);}
     },30000);
     return()=>clearInterval(interval);
   },[]);
 
-  // ── Today midnight in NZ time (for man hours clamp) ──
-  const todayMidnightNZ=(()=>{
-    const d=new Date();
-    const nzStr=d.toLocaleDateString("en-CA",{timeZone:NZ_TZ}); // YYYY-MM-DD
-    return new Date(nzStr+"T00:00:00"+getTimezoneOffsetStr(nzStr));
-  })();
-  function getTimezoneOffsetStr(dateStr){
-    // Get NZ offset for the given date (handles DST)
-    try{
-      const jan=new Date(dateStr+"T00:00:00Z");
-      const nzStr=jan.toLocaleString("en-CA",{timeZone:NZ_TZ,hour12:false,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
-      return ""; // use simple approach below
-    }catch{ return ""; }
-  }
-  // Simpler: midnight NZ = parse today's date string as NZ local
+  // ── Today midnight NZ time in ms — used to clamp active order man-hours ──
   const todayMidnightMs=(()=>{
+    // Get today's date string in NZ timezone e.g. "2026-07-01"
     const nzDateStr=new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});
-    // Build a UTC ms value for midnight NZ by finding what UTC time = midnight NZ
-    const sample=new Date(nzDateStr+"T00:00:00");
-    // Adjust: find NZ offset by comparing
-    const nzMidnightISO=nzDateStr+"T00:00:00";
-    const utcGuess=new Date(nzMidnightISO);
-    const nzCheck=utcGuess.toLocaleDateString("en-CA",{timeZone:NZ_TZ});
-    if(nzCheck===nzDateStr) return utcGuess.getTime();
-    // fallback: use Intl to find exact offset
-    const fmt=new Intl.DateTimeFormat("en-CA",{timeZone:NZ_TZ,hour:"numeric",minute:"numeric",hour12:false});
-    return Date.now()-((new Date()).getHours()*60+(new Date()).getMinutes())*60000;
+    // Find what UTC ms corresponds to midnight NZ by binary-searching the offset
+    // Simpler: use Intl.DateTimeFormat to get the NZ offset directly
+    const probe=new Date(nzDateStr+"T00:00:00Z");
+    const nzHour=Number(new Intl.DateTimeFormat("en-AU",{timeZone:NZ_TZ,hour:"numeric",hour12:false}).format(probe));
+    // nzHour at UTC midnight tells us offset: if NZ is UTC+12, nzHour=12
+    // midnight NZ = UTC midnight minus that offset in hours
+    const offsetMs=nzHour*3600000;
+    return probe.getTime()-offsetMs;
   })();
   const todayDone=todayOrders.filter(o=>o.status==="Completed");
   const todayEffAvg=(()=>{const e=todayDone.filter(o=>o.efficiency!=null).map(o=>o.efficiency);return e.length?Math.round(e.reduce((a,b)=>a+b)/e.length):null;})();
