@@ -494,29 +494,7 @@ function ProductionScheduler({user,onLogout}){
     return()=>clearInterval(interval);
   },[]);
 
-  // ── Today midnight NZ time in ms ──
-  // Most reliable: toLocaleString with sv locale gives "YYYY-MM-DD HH:MM:SS" in NZ time
-  const todayMidnightMs=(()=>{
-    try{
-      const now=new Date();
-      // Get NZ local date string e.g. "2026-07-01"
-      const nzDate=now.toLocaleDateString("en-CA",{timeZone:NZ_TZ});
-      // Get full NZ datetime to find offset — sv locale gives sortable ISO-like string
-      const nzFull=now.toLocaleString("sv",{timeZone:NZ_TZ}); // "2026-07-01 10:30:00"
-      const nzNow=new Date(nzFull.replace(" ","T")+"Z"); // treat as UTC to get ms offset
-      const utcNow=now.getTime();
-      const diff=nzNow.getTime()-utcNow; // NZ offset in ms (positive = ahead)
-      // midnight NZ in UTC ms = UTC midnight of NZ date minus offset correction
-      const [y,mo,d]=nzDate.split("-").map(Number);
-      const utcMidnight=Date.UTC(y,mo-1,d);
-      // NZ midnight = utcMidnight adjusted by offset
-      return utcMidnight-diff;
-    }catch(e){
-      // Fallback: approximate midnight as start of today UTC (safe for same-day orders)
-      const now=new Date();
-      return Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate());
-    }
-  })();
+
   const todayDone=todayOrders.filter(o=>o.status==="Completed");
   const todayEffAvg=(()=>{const e=todayDone.filter(o=>o.efficiency!=null).map(o=>o.efficiency);return e.length?Math.round(e.reduce((a,b)=>a+b)/e.length):null;})();
 
@@ -977,36 +955,7 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
   const yearLoading=yearStats?.loading;
 
   let todayManMins=0;
-  // For active orders: clamp start to today's midnight NZ so overnight orders only count today's hours
-  activeOrders.forEach(o=>{
-    const numE=o.num_employees||1;
-    const startMs=new Date(o.start_datetime).getTime();
-    const clampedStartMs=Math.max(startMs,todayMidnightMs);
-    if(!o.is_paused){
-      // Working since clampedStart (minus breaks that occurred before clamped start)
-      const breaksToday=(o.breaks||[]).reduce((a,b)=>{
-        const bStart=new Date(b.start).getTime();
-        if(bStart>=todayMidnightMs) return a+(b.minutes||0);
-        // break started before midnight but ended after — count only the part from midnight
-        const bEnd=new Date(b.end).getTime();
-        if(bEnd>todayMidnightMs) return a+Math.round((bEnd-todayMidnightMs)/60000);
-        return a;
-      },0);
-      todayManMins+=Math.max(0,((Date.now()-clampedStartMs)/60000-breaksToday))*numE;
-    } else {
-      // Paused: count from clampedStart to paused_at minus today's breaks
-      const pausedMs=new Date(o.paused_at||nowISO()).getTime();
-      const clampedPausedMs=Math.max(pausedMs,todayMidnightMs);
-      const breaksToday=(o.breaks||[]).reduce((a,b)=>{
-        const bStart=new Date(b.start).getTime();
-        if(bStart>=todayMidnightMs) return a+(b.minutes||0);
-        const bEnd=new Date(b.end).getTime();
-        if(bEnd>todayMidnightMs) return a+Math.round((bEnd-todayMidnightMs)/60000);
-        return a;
-      },0);
-      todayManMins+=Math.max(0,((clampedPausedMs-clampedStartMs)/60000-breaksToday))*numE;
-    }
-  });
+  activeOrders.forEach(o=>{const numE=o.num_employees||1;if(!o.is_paused)todayManMins+=((Date.now()-new Date(o.start_datetime)-((o.break_minutes||0)*60000))/60000)*numE;else todayManMins+=(minsTo(o.start_datetime,o.paused_at||nowISO())-(o.break_minutes||0))*numE;});
   orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime)===td).forEach(o=>{todayManMins+=(o.working_minutes||o.actual_minutes||0)*(o.num_employees||1);});
   const todayManHrs=(todayManMins/60).toFixed(1);
 
@@ -1017,26 +966,7 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
     mhByLine[o.line_id].mins+=mins;
     (o.employees||[o.employee]).forEach(e=>{if(!mhByLine[o.line_id].emps.includes(e))mhByLine[o.line_id].emps.push(e);});
   };
-  activeOrders.forEach(o=>{
-    const numE=o.num_employees||1;
-    const startMs=new Date(o.start_datetime).getTime();
-    const clampedStartMs=Math.max(startMs,todayMidnightMs);
-    const breaksToday=(o.breaks||[]).reduce((a,b)=>{
-      const bStart=new Date(b.start).getTime();
-      if(bStart>=todayMidnightMs) return a+(b.minutes||0);
-      const bEnd=new Date(b.end).getTime();
-      if(bEnd>todayMidnightMs) return a+Math.round((bEnd-todayMidnightMs)/60000);
-      return a;
-    },0);
-    let m;
-    if(o.is_paused){
-      const pausedMs=Math.max(new Date(o.paused_at||nowISO()).getTime(),todayMidnightMs);
-      m=Math.max(0,((pausedMs-clampedStartMs)/60000-breaksToday));
-    } else {
-      m=Math.max(0,((Date.now()-clampedStartMs)/60000-breaksToday));
-    }
-    addToLine(o,m*numE);
-  });
+  activeOrders.forEach(o=>{const m=o.is_paused?minsTo(o.start_datetime,o.paused_at||nowISO())-(o.break_minutes||0):((Date.now()-new Date(o.start_datetime))/60000)-(o.break_minutes||0); addToLine(o,Math.max(m,0)*(o.num_employees||1));});
   orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime)===td).forEach(o=>addToLine(o,(o.working_minutes||o.actual_minutes||0)*(o.num_employees||1)));
   const mhArr=Object.values(mhByLine).sort((a,b)=>b.mins-a.mins);
   const maxMins=Math.max(...mhArr.map(l=>l.mins),1);
