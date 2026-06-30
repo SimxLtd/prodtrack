@@ -1896,7 +1896,7 @@ function MonthlyTracker({orders,items}){
       if(effInst.current){effInst.current.destroy();effInst.current=null;}
       if(barInst.current){barInst.current.destroy();barInst.current=null;}
     };
-  },[chartReady,chartView,selYear,selMonth,orders]);
+  },[chartReady,chartView,selYear,selMonth,orders,monthCache,monthLoading]);
 
   return(
     <div>
