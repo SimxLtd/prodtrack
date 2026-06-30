@@ -473,11 +473,60 @@ function ProductionScheduler({user,onLogout}){
   // Helper: is this order assigned to the current user?
   const isMine=o=>(o.employees||[o.employee]).includes(user.full_name);
   // Active orders
-  const activeOrders=orders.filter(o=>o.status==="In Progress");
+  const activeOrders=orders.filter(o=>o.status==="In Progress"||o.status==="On Break");
   // Worker sees only their own active orders; admin sees all
   const myActiveOrders=activeOrders;
   // Today's orders by local start date — ALL employees for both admin and worker
   const todayOrders=orders.filter(o=>toLocalDate(o.start_datetime)===td);
+
+  // ── Auto-refresh active orders every 30s ──
+  useEffect(()=>{
+    const interval=setInterval(async()=>{
+      if(document.hidden) return; // pause when tab not visible
+      try{
+        const fresh=await db.getActiveOrders();
+        setOrders(prev=>{
+          // Merge: keep completed/historical orders, replace active ones with fresh data
+          const freshIds=new Set(fresh.map(o=>o.id));
+          const nonActive=prev.filter(o=>o.status!=="In Progress"&&o.status!=="On Break");
+          const stillActive=prev.filter(o=>o.status==="In Progress"||o.status==="On Break");
+          // Add any new active orders not in prev
+          const merged=[...nonActive,...fresh];
+          return merged;
+        });
+      }catch(e){ console.warn("Auto-refresh failed:",e.message); }
+    },30000);
+    return()=>clearInterval(interval);
+  },[]);
+
+  // ── Today midnight in NZ time (for man hours clamp) ──
+  const todayMidnightNZ=(()=>{
+    const d=new Date();
+    const nzStr=d.toLocaleDateString("en-CA",{timeZone:NZ_TZ}); // YYYY-MM-DD
+    return new Date(nzStr+"T00:00:00"+getTimezoneOffsetStr(nzStr));
+  })();
+  function getTimezoneOffsetStr(dateStr){
+    // Get NZ offset for the given date (handles DST)
+    try{
+      const jan=new Date(dateStr+"T00:00:00Z");
+      const nzStr=jan.toLocaleString("en-CA",{timeZone:NZ_TZ,hour12:false,year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit"});
+      return ""; // use simple approach below
+    }catch{ return ""; }
+  }
+  // Simpler: midnight NZ = parse today's date string as NZ local
+  const todayMidnightMs=(()=>{
+    const nzDateStr=new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+    // Build a UTC ms value for midnight NZ by finding what UTC time = midnight NZ
+    const sample=new Date(nzDateStr+"T00:00:00");
+    // Adjust: find NZ offset by comparing
+    const nzMidnightISO=nzDateStr+"T00:00:00";
+    const utcGuess=new Date(nzMidnightISO);
+    const nzCheck=utcGuess.toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+    if(nzCheck===nzDateStr) return utcGuess.getTime();
+    // fallback: use Intl to find exact offset
+    const fmt=new Intl.DateTimeFormat("en-CA",{timeZone:NZ_TZ,hour:"numeric",minute:"numeric",hour12:false});
+    return Date.now()-((new Date()).getHours()*60+(new Date()).getMinutes())*60000;
+  })();
   const todayDone=todayOrders.filter(o=>o.status==="Completed");
   const todayEffAvg=(()=>{const e=todayDone.filter(o=>o.efficiency!=null).map(o=>o.efficiency);return e.length?Math.round(e.reduce((a,b)=>a+b)/e.length):null;})();
 
@@ -630,6 +679,12 @@ function ProductionScheduler({user,onLogout}){
 
               {/* ── Monthly Efficiency Tracker ── */}
               <MonthlyTracker orders={orders} items={items}/>
+
+              {/* ── Divider ── */}
+              <div style={{height:1,background:"#2A2F45",margin:"22px 0"}}/>
+
+              {/* ── Efficiency Distribution Pie ── */}
+              <EfficiencyPie orders={orders}/>
 
               {/* ── Divider ── */}
               <div style={{height:1,background:"#2A2F45",margin:"22px 0"}}/>
@@ -932,7 +987,36 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
   const yearLoading=yearStats?.loading;
 
   let todayManMins=0;
-  activeOrders.forEach(o=>{const numE=o.num_employees||1;if(!o.is_paused)todayManMins+=((Date.now()-new Date(o.start_datetime)-((o.break_minutes||0)*60000))/60000)*numE;else todayManMins+=(minsTo(o.start_datetime,o.paused_at||nowISO())-(o.break_minutes||0))*numE;});
+  // For active orders: clamp start to today's midnight NZ so overnight orders only count today's hours
+  activeOrders.forEach(o=>{
+    const numE=o.num_employees||1;
+    const startMs=new Date(o.start_datetime).getTime();
+    const clampedStartMs=Math.max(startMs,todayMidnightMs);
+    if(!o.is_paused){
+      // Working since clampedStart (minus breaks that occurred before clamped start)
+      const breaksToday=(o.breaks||[]).reduce((a,b)=>{
+        const bStart=new Date(b.start).getTime();
+        if(bStart>=todayMidnightMs) return a+(b.minutes||0);
+        // break started before midnight but ended after — count only the part from midnight
+        const bEnd=new Date(b.end).getTime();
+        if(bEnd>todayMidnightMs) return a+Math.round((bEnd-todayMidnightMs)/60000);
+        return a;
+      },0);
+      todayManMins+=Math.max(0,((Date.now()-clampedStartMs)/60000-breaksToday))*numE;
+    } else {
+      // Paused: count from clampedStart to paused_at minus today's breaks
+      const pausedMs=new Date(o.paused_at||nowISO()).getTime();
+      const clampedPausedMs=Math.max(pausedMs,todayMidnightMs);
+      const breaksToday=(o.breaks||[]).reduce((a,b)=>{
+        const bStart=new Date(b.start).getTime();
+        if(bStart>=todayMidnightMs) return a+(b.minutes||0);
+        const bEnd=new Date(b.end).getTime();
+        if(bEnd>todayMidnightMs) return a+Math.round((bEnd-todayMidnightMs)/60000);
+        return a;
+      },0);
+      todayManMins+=Math.max(0,((clampedPausedMs-clampedStartMs)/60000-breaksToday))*numE;
+    }
+  });
   orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime)===td).forEach(o=>{todayManMins+=(o.working_minutes||o.actual_minutes||0)*(o.num_employees||1);});
   const todayManHrs=(todayManMins/60).toFixed(1);
 
@@ -943,7 +1027,26 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
     mhByLine[o.line_id].mins+=mins;
     (o.employees||[o.employee]).forEach(e=>{if(!mhByLine[o.line_id].emps.includes(e))mhByLine[o.line_id].emps.push(e);});
   };
-  activeOrders.forEach(o=>{const m=o.is_paused?minsTo(o.start_datetime,o.paused_at||nowISO())-(o.break_minutes||0):((Date.now()-new Date(o.start_datetime))/60000)-(o.break_minutes||0); addToLine(o,Math.max(m,0)*(o.num_employees||1));});
+  activeOrders.forEach(o=>{
+    const numE=o.num_employees||1;
+    const startMs=new Date(o.start_datetime).getTime();
+    const clampedStartMs=Math.max(startMs,todayMidnightMs);
+    const breaksToday=(o.breaks||[]).reduce((a,b)=>{
+      const bStart=new Date(b.start).getTime();
+      if(bStart>=todayMidnightMs) return a+(b.minutes||0);
+      const bEnd=new Date(b.end).getTime();
+      if(bEnd>todayMidnightMs) return a+Math.round((bEnd-todayMidnightMs)/60000);
+      return a;
+    },0);
+    let m;
+    if(o.is_paused){
+      const pausedMs=Math.max(new Date(o.paused_at||nowISO()).getTime(),todayMidnightMs);
+      m=Math.max(0,((pausedMs-clampedStartMs)/60000-breaksToday));
+    } else {
+      m=Math.max(0,((Date.now()-clampedStartMs)/60000-breaksToday));
+    }
+    addToLine(o,m*numE);
+  });
   orders.filter(o=>o.status==="Completed"&&toLocalDate(o.start_datetime)===td).forEach(o=>addToLine(o,(o.working_minutes||o.actual_minutes||0)*(o.num_employees||1)));
   const mhArr=Object.values(mhByLine).sort((a,b)=>b.mins-a.mins);
   const maxMins=Math.max(...mhArr.map(l=>l.mins),1);
@@ -2202,6 +2305,263 @@ function EmployeeEfficiency({orders,employees}){
               <div style={{fontSize:9,color:"#5A5F78",marginTop:10}}>Multi-employee orders credit the same efficiency to all workers on that order.</div>
             </div>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+//  EFFICIENCY PIE CHART
+// ══════════════════════════════════════════════════════════════
+function EfficiencyPie({orders}){
+  const nowNZ=new Date();
+  const curNZDate=nowNZ.toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+  const curNZYear=Number(curNZDate.slice(0,4));
+  const curNZMonth=Number(curNZDate.slice(5,7))-1;
+
+  const [view,setPieView]=useState("month"); // "month" | "today"
+  const [selYear,setSelYear]=useState(curNZYear);
+  const [selMonth,setSelMonth]=useState(curNZMonth);
+  const [monthCache,setMonthCache]=useState({});
+  const [monthLoading,setMonthLoading]=useState(false);
+  const svgRef=useRef(null);
+
+  const isCurrentMonth=selYear===curNZYear&&selMonth===curNZMonth;
+  const monthStr=String(selMonth+1).padStart(2,"0");
+  const cacheKey=`${selYear}-${monthStr}`;
+  const monthName=new Date(selYear,selMonth,1).toLocaleDateString("en-NZ",{month:"long",year:"numeric"});
+  const toNZ=dt=>!dt?"":new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+  const today=curNZDate;
+
+  const prevMonth=()=>{ if(selMonth===0){setSelMonth(11);setSelYear(y=>y-1);}else setSelMonth(m=>m-1); };
+  const nextMonth=()=>{ if(isCurrentMonth)return; if(selMonth===11){setSelMonth(0);setSelYear(y=>y+1);}else setSelMonth(m=>m+1); };
+
+  useEffect(()=>{
+    if(isCurrentMonth)return;
+    if(monthCache[cacheKey])return;
+    let cancelled=false;
+    const fetch=async()=>{
+      setMonthLoading(true);
+      try{
+        const lastDay=new Date(selYear,selMonth+1,0).getDate();
+        const from=`${selYear}-${monthStr}-01T00:00:00`;
+        const to=`${selYear}-${monthStr}-${String(lastDay).padStart(2,"0")}T23:59:59`;
+        const data=await db.getMonthOrders(from,to);
+        if(!cancelled)setMonthCache(p=>({...p,[cacheKey]:data}));
+      }catch(e){console.error("EffPie fetch:",e);}
+      if(!cancelled)setMonthLoading(false);
+    };
+    fetch();
+    return()=>{cancelled=true;};
+  },[selYear,selMonth,isCurrentMonth,cacheKey]);
+
+  const activeOrders=isCurrentMonth?orders:(monthCache[cacheKey]||[]);
+
+  // Filter source based on view
+  const src=activeOrders.filter(o=>{
+    if(o.status!=="Completed"||o.efficiency==null)return false;
+    if(view==="today")return toNZ(o.start_datetime)===today;
+    return toNZ(o.start_datetime).slice(0,7)===`${selYear}-${monthStr}`;
+  });
+
+  // 4 bands
+  const BANDS=[
+    {key:"above", label:"Above",  range:"≥100%", min:100, max:Infinity, color:"#00D4AA", emoji:"🟢"},
+    {key:"good",  label:"Good",   range:"≥80%",  min:80,  max:100,      color:"#FFC107", emoji:"🟡"},
+    {key:"fair",  label:"Fair",   range:"≥60%",  min:60,  max:80,       color:"#FF9500", emoji:"🟠"},
+    {key:"poor",  label:"Poor",   range:"<60%",  min:0,   max:60,       color:"#FF4B6E", emoji:"🔴"},
+  ];
+
+  const banded=BANDS.map(b=>({
+    ...b,
+    orders:src.filter(o=>o.efficiency>=b.min&&o.efficiency<b.max),
+  })).map(b=>({
+    ...b,
+    count:b.orders.length,
+    qty:b.orders.reduce((a,o)=>a+(o.end_qty||0),0),
+    avgEff:b.orders.length?Math.round(b.orders.reduce((a,o)=>a+o.efficiency,0)/b.orders.length):null,
+  }));
+
+  const total=src.length;
+  const totalQty=src.reduce((a,o)=>a+(o.end_qty||0),0);
+  const totalAvgEff=src.filter(o=>o.efficiency!=null).length?
+    Math.round(src.reduce((a,o)=>a+(o.efficiency||0),0)/src.length):null;
+
+  // Draw SVG pie
+  useEffect(()=>{
+    const svg=svgRef.current;
+    if(!svg)return;
+    while(svg.firstChild)svg.removeChild(svg.firstChild);
+    const cx=115,cy=115,R=100,r=60;
+    if(total===0)return;
+
+    const ns="http://www.w3.org/2000/svg";
+    function polar(cx,cy,rad,angle){return[cx+rad*Math.cos(angle),cy+rad*Math.sin(angle)];}
+
+    let start=-Math.PI/2;
+    banded.forEach(b=>{
+      if(b.count===0)return;
+      const sweep=(b.count/total)*Math.PI*2;
+      const end=start+sweep;
+      const large=sweep>Math.PI?1:0;
+      const [x1,y1]=polar(cx,cy,R,start);
+      const [x2,y2]=polar(cx,cy,R,end);
+      const [x3,y3]=polar(cx,cy,r,end);
+      const [x4,y4]=polar(cx,cy,r,start);
+
+      const path=document.createElementNS(ns,"path");
+      path.setAttribute("d",`M${x1} ${y1} A${R} ${R} 0 ${large} 1 ${x2} ${y2} L${x3} ${y3} A${r} ${r} 0 ${large} 0 ${x4} ${y4}Z`);
+      path.setAttribute("fill",b.color);
+      path.setAttribute("stroke","#1A1D27");
+      path.setAttribute("stroke-width","3");
+      svg.appendChild(path);
+
+      // Label inside slice
+      if(sweep>0.25){
+        const mid=start+sweep/2;
+        const lr=(R+r)/2;
+        const [lx,ly]=polar(cx,cy,lr,mid);
+        const pct=Math.round(b.count/total*100);
+
+        const t1=document.createElementNS(ns,"text");
+        t1.setAttribute("x",lx);t1.setAttribute("y",ly-6);
+        t1.setAttribute("text-anchor","middle");t1.setAttribute("dominant-baseline","middle");
+        t1.setAttribute("fill","#FFFFFF");t1.setAttribute("font-size","13");t1.setAttribute("font-weight","700");
+        t1.setAttribute("font-family","IBM Plex Mono,monospace");
+        t1.textContent=b.count;
+        svg.appendChild(t1);
+
+        const t2=document.createElementNS(ns,"text");
+        t2.setAttribute("x",lx);t2.setAttribute("y",ly+9);
+        t2.setAttribute("text-anchor","middle");t2.setAttribute("dominant-baseline","middle");
+        t2.setAttribute("fill","rgba(255,255,255,0.85)");t2.setAttribute("font-size","10");
+        t2.setAttribute("font-family","IBM Plex Mono,monospace");
+        t2.textContent=pct+"%";
+        svg.appendChild(t2);
+      }
+
+      start=end;
+    });
+
+    // Donut hole
+    const hole=document.createElementNS(ns,"circle");
+    hole.setAttribute("cx",cx);hole.setAttribute("cy",cy);hole.setAttribute("r",r-1);
+    hole.setAttribute("fill","#1A1D27");
+    svg.appendChild(hole);
+  },[banded,total]);
+
+  const fmtNum=n=>n>=1000?(n/1000).toFixed(1)+"k":String(n);
+
+  return(
+    <div>
+      {/* Header */}
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:10}}>
+        <div>
+          <div style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>Efficiency Distribution</div>
+          <div style={{fontSize:10,color:"#5A5F78",marginTop:2}}>
+            {view==="today"?`Today ${today}`:`${monthName}`} · {total} completed orders
+            {monthLoading&&<span style={{marginLeft:8,fontSize:10,color:"#7B8CFF",fontWeight:700,background:"rgba(123,140,255,.1)",border:"1px solid rgba(123,140,255,.2)",padding:"2px 8px",borderRadius:8}}>⟳ Loading…</span>}
+          </div>
+        </div>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          {/* Today / Month toggle */}
+          <div style={{display:"flex",background:"#13161F",border:"1px solid #2A2F45",borderRadius:5,overflow:"hidden"}}>
+            {[["month","Month"],["today","Today"]].map(([v,lbl])=>(
+              <button key={v} onClick={()=>setPieView(v)}
+                style={{background:view===v?"rgba(0,212,170,.07)":"none",border:"none",color:view===v?"#00D4AA":"#8B90A8",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,padding:"5px 12px",cursor:"pointer",borderRight:v==="month"?"1px solid #2A2F45":"none",fontWeight:view===v?700:400}}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+          {view==="month"&&(
+            <div style={{display:"flex",alignItems:"center",background:"#1A1D27",border:"1px solid #2A2F45",borderRadius:6,overflow:"hidden"}}>
+              <button onClick={prevMonth} style={{background:"none",border:"none",color:"#8B90A8",fontSize:15,padding:"6px 11px",cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace"}}
+                onMouseEnter={e=>{e.currentTarget.style.color="#00D4AA";}}
+                onMouseLeave={e=>{e.currentTarget.style.color="#8B90A8";}}>‹</button>
+              <div style={{fontSize:11,color:"#E8EAF0",padding:"6px 12px",fontWeight:700,minWidth:110,textAlign:"center",borderLeft:"1px solid #2A2F45",borderRight:"1px solid #2A2F45"}}>{monthName}</div>
+              <button onClick={nextMonth} disabled={isCurrentMonth}
+                style={{background:"none",border:"none",color:isCurrentMonth?"#3A3F55":"#8B90A8",fontSize:15,padding:"6px 11px",cursor:isCurrentMonth?"not-allowed":"pointer",fontFamily:"'IBM Plex Mono',monospace"}}
+                onMouseEnter={e=>{if(!isCurrentMonth)e.currentTarget.style.color="#00D4AA";}}
+                onMouseLeave={e=>{e.currentTarget.style.color=isCurrentMonth?"#3A3F55":"#8B90A8";}}>›</button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* 4 KPI cards */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:18}}>
+        {banded.map(b=>(
+          <div key={b.key} style={{background:"#13161F",borderRadius:6,padding:"10px 12px",borderTop:`3px solid ${b.color}`}}>
+            <div style={{fontSize:8,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase",marginBottom:4}}>{b.emoji} {b.label} {b.range}</div>
+            <div style={{fontSize:20,fontWeight:700,color:b.color,lineHeight:1}}>{b.count}</div>
+            <div style={{fontSize:9,color:"#5A5F78",marginTop:4}}>
+              {total>0?Math.round(b.count/total*100):0}% · {fmtNum(b.qty)} pcs
+              {b.avgEff!=null&&<span style={{marginLeft:6,color:b.color}}>avg {b.avgEff}%</span>}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {total===0?(
+        <div className="card" style={{textAlign:"center",padding:32,color:"#4A4F65",fontSize:12}}>
+          No completed orders with efficiency data for this period.
+        </div>
+      ):(
+        <div style={{display:"flex",alignItems:"center",gap:28,flexWrap:"wrap"}}>
+          {/* SVG Pie */}
+          <div style={{position:"relative",flexShrink:0}}>
+            <svg ref={svgRef} width="230" height="230" viewBox="0 0 230 230"/>
+            <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none"}}>
+              <div style={{fontSize:22,fontWeight:700,color:"#E8EAF0",lineHeight:1}}>{total}</div>
+              <div style={{fontSize:9,color:"#5A5F78",marginTop:2}}>orders</div>
+            </div>
+          </div>
+
+          {/* Table */}
+          <div style={{flex:1,minWidth:260,overflowX:"auto"}}>
+            <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:14}}>
+              {banded.map(b=>(
+                <div key={b.key} style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:"#8B90A8"}}>
+                  <div style={{width:11,height:11,borderRadius:"50%",background:b.color,flexShrink:0}}/>
+                  {b.range} {b.label}
+                </div>
+              ))}
+            </div>
+            <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+              <thead>
+                <tr style={{borderBottom:"1px solid #2A2F45"}}>
+                  {["Band","Orders","%","Total Qty","Avg Eff"].map(h=>(
+                    <th key={h} style={{padding:"7px 10px",textAlign:h==="Band"?"left":"right",color:"#5A5F78",fontSize:9,letterSpacing:1,textTransform:"uppercase"}}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {banded.map(b=>(
+                  <tr key={b.key} style={{borderBottom:"1px solid #1E2135"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="#1A1F30"}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <td style={{padding:"7px 10px"}}>
+                      <span style={{display:"inline-block",width:10,height:10,borderRadius:"50%",background:b.color,marginRight:7,verticalAlign:"middle"}}/>
+                      <span style={{color:b.color,fontWeight:700}}>{b.range}</span>
+                    </td>
+                    <td style={{padding:"7px 10px",textAlign:"right",color:b.color,fontWeight:700}}>{b.count}</td>
+                    <td style={{padding:"7px 10px",textAlign:"right",color:"#8B90A8"}}>{total>0?Math.round(b.count/total*100):0}%</td>
+                    <td style={{padding:"7px 10px",textAlign:"right",color:"#C8CADC"}}>{b.qty.toLocaleString()}</td>
+                    <td style={{padding:"7px 10px",textAlign:"right",color:b.avgEff!=null?b.color:"#4A4F65",fontWeight:700}}>{b.avgEff!=null?b.avgEff+"%":"—"}</td>
+                  </tr>
+                ))}
+                <tr style={{borderTop:"1px solid #2A2F45"}}>
+                  <td style={{padding:"7px 10px",color:"#8B90A8",fontWeight:700}}>Total</td>
+                  <td style={{padding:"7px 10px",textAlign:"right",color:"#E8EAF0",fontWeight:700}}>{total}</td>
+                  <td style={{padding:"7px 10px",textAlign:"right",color:"#8B90A8"}}>100%</td>
+                  <td style={{padding:"7px 10px",textAlign:"right",color:"#E8EAF0",fontWeight:700}}>{totalQty.toLocaleString()}</td>
+                  <td style={{padding:"7px 10px",textAlign:"right",color:effColor(totalAvgEff),fontWeight:700}}>{totalAvgEff!=null?totalAvgEff+"%":"—"}</td>
+                </tr>
+              </tbody>
+            </table>
+            <div style={{fontSize:9,color:"#5A5F78",marginTop:8}}>Completed orders only · Orders without efficiency score excluded</div>
+          </div>
         </div>
       )}
     </div>
