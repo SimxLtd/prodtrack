@@ -686,20 +686,20 @@ function ProductionScheduler({user,onLogout}){
                   <div style={{flex:"1 1 200px",minWidth:180,position:"relative"}}>
                     <label>Item {fItem!=="All"&&<span style={{color:"#00D4AA",fontSize:9}}>— filtered</span>}</label>
                     {(()=>{
-                      // For the dropdown search: search ALL items in the catalogue
-                      // For the count label: only show how many match in current date range
-                      const dfOrders=orders.filter(o=>{
+                      // Only show items used within the current date range — same pattern as order number filter
+                      // Uses recordsSource (which includes all orders if Clear All was pressed)
+                      const dfOrders=recordsSource.filter(o=>{
                         const od=toNZDate(o.start_datetime);
                         return(!fFrom||od>=fFrom)&&(!fTo||od<=fTo);
                       });
-                      const idsInRange=new Set(dfOrders.map(o=>o.item_id).filter(Boolean));
-                      // Search across ALL items in catalogue when typing
+                      const allIds=[...new Set(dfOrders.map(o=>o.item_id).filter(Boolean))].sort();
                       const filteredIds=fItemSearch.trim()
-                        ?items.filter(i=>{
+                        ?allIds.filter(id=>{
+                            const nm=items.find(i=>i.id===id)?.name||"";
                             const q=fItemSearch.trim().toUpperCase();
-                            return i.id?.toUpperCase().includes(q)||i.name?.toUpperCase().includes(q);
-                          }).map(i=>i.id)
-                        :[...idsInRange].sort();
+                            return id.toUpperCase().includes(q)||nm.toUpperCase().includes(q);
+                          })
+                        :allIds;
                       return(
                         <div style={{position:"relative"}}>
                           <div style={{display:"flex",gap:4,alignItems:"center"}}>
@@ -720,10 +720,9 @@ function ProductionScheduler({user,onLogout}){
                           {fItemSearch.trim()&&(
                             <div style={{position:"absolute",zIndex:100,top:"100%",left:0,right:0,marginTop:3,background:"#1A1D27",border:"1px solid #2A2F45",borderRadius:5,boxShadow:"0 6px 24px rgba(0,0,0,.5)",maxHeight:200,overflowY:"auto"}}>
                               {filteredIds.length===0
-                                ?<div style={{padding:"10px 12px",color:"#4A4F65",fontSize:11}}>No items found</div>
+                                ?<div style={{padding:"10px 12px",color:"#4A4F65",fontSize:11}}>No items found in selected date range</div>
                                 :filteredIds.map(id=>{
                                   const nm=items.find(i=>i.id===id)?.name||"";
-                                  const inRange=idsInRange.has(id);
                                   return(
                                     <div key={id} onClick={()=>{setFItem(id);setFItemSearch("");}}
                                       style={{padding:"8px 12px",cursor:"pointer",fontSize:11,borderBottom:"1px solid #1E2135",display:"flex",justifyContent:"space-between",alignItems:"center",background:fItem===id?"rgba(0,212,170,.08)":"transparent"}}
@@ -731,12 +730,11 @@ function ProductionScheduler({user,onLogout}){
                                       onMouseLeave={e=>e.currentTarget.style.background=fItem===id?"rgba(0,212,170,.08)":"transparent"}>
                                       <span style={{color:"#5A5F78",marginRight:8,fontSize:10}}>{id}</span>
                                       <span style={{color:"#C8CADC",flex:1}}>{nm}</span>
-                                      {inRange&&<span style={{fontSize:8,color:"#00D4AA",marginLeft:6,background:"rgba(0,212,170,.1)",padding:"1px 5px",borderRadius:4,flexShrink:0}}>in range</span>}
                                     </div>
                                   );
                                 })
                               }
-                              <div style={{padding:"6px 12px",fontSize:9,color:"#4A4F65",borderTop:"1px solid #1E2135"}}>{filteredIds.length} item{filteredIds.length!==1?"s":""} found · green = in current date range</div>
+                              <div style={{padding:"6px 12px",fontSize:9,color:"#4A4F65",borderTop:"1px solid #1E2135"}}>{filteredIds.length} item{filteredIds.length!==1?"s":""} in selected date range</div>
                             </div>
                           )}
                         </div>
