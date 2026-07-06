@@ -51,7 +51,7 @@ const db = {
   getAllPlanned:   ()      => sbAll("pt_planned_orders","order=scheduled_datetime.asc"),
   addPlanned:     (o)     => sb("pt_planned_orders",{method:"POST",body:JSON.stringify(o)}),
   updatePlanned:  (id,o)  => sb(`pt_planned_orders?id=eq.${id}`,{method:"PATCH",body:JSON.stringify(o)}),
-  deletePlanned:  (id)    => sb(`pt_planned_orders?id=eq.${id}`,{method:"DELETE",headers:{Prefer:""}}),
+  deletePlanned:  (id)    => sb(`pt_planned_orders?id=eq.${id}`,{method:"DELETE",headers:{Prefer:"return=minimal"}}),
   findPlanned:    (n)     => sb(`pt_planned_orders?order_number=eq.${encodeURIComponent(n)}`),
 };
 
@@ -1052,15 +1052,24 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
       </div>
       {activeOrders.length===0
         ?<div className="card" style={{textAlign:"center",padding:40,color:"#4A4F65"}}><div style={{fontSize:36,marginBottom:10}}>📭</div><div>No active orders.</div></div>
-        :<div style={{display:"grid",gap:10}}>{activeOrders.map(o=>{
-          const q=activeSearch.trim();
-          const isMatch=q&&(
-            o.order_number?.toUpperCase().includes(q)||
-            (o.employees||[o.employee]).some(e=>e?.toUpperCase().includes(q))
-          );
-          return(
+        :<div style={{display:"grid",gap:10}}>{(()=>{
+          const q=activeSearch.trim().toUpperCase();
+          const withMatch=activeOrders.map(o=>({
+            o,
+            isMatch:!!q&&(
+              o.order_number?.toUpperCase().includes(q)||
+              (o.employees||[o.employee]).some(e=>e?.toUpperCase().includes(q))
+            ),
+          }));
+          const sorted=q
+            ?[...withMatch.filter(x=>x.isMatch),...withMatch.filter(x=>!x.isMatch)]
+            :withMatch;
+          const hasMatches=q&&withMatch.some(x=>x.isMatch);
+          return sorted.map(({o,isMatch})=>(
             <div key={o.id} id={"order-"+o.id}
-              style={{borderRadius:8,transition:"box-shadow .2s",...(isMatch?{boxShadow:"0 0 0 2px #00D4AA"}:{})}}>
+              style={{borderRadius:8,transition:"box-shadow .2s,opacity .2s",
+                ...(isMatch?{boxShadow:"0 0 0 2px #00D4AA"}:{}),
+                ...(hasMatches&&!isMatch?{opacity:.35}:{})}}>
               <OrderCard order={o} item={items.find(i=>i.id===o.item_id)}
                 onClose={!o.is_paused?()=>onClose(o):null}
                 onPause={!o.is_paused?()=>onPause(o):null}
@@ -1070,8 +1079,8 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
                 highlight={!!isMatch}
               />
             </div>
-          );
-        })}</div>
+          ));
+        })()}</div>
       }
     </div>
   );
