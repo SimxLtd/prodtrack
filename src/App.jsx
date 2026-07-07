@@ -7,7 +7,8 @@ const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 // ─── SUPABASE ──────────────────────────────────────────────────
 const sbH = () => ({ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`, "Content-Type":"application/json", Prefer:"return=representation" });
 const sb = async (path, opts={}) => {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { headers:{...sbH(),...(opts.headers||{})}, ...opts });
+  const {headers:extraHeaders, ...restOpts} = opts;
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, { ...restOpts, headers:{...sbH(),...(extraHeaders||{})} });
   if (!res.ok) {
     const errText = await res.text();
     let errMsg = errText;
