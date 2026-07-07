@@ -615,8 +615,8 @@ function ProductionScheduler({user,onLogout}){
                 <div className="fg">
                   <label>Start Date & Time</label>
                   <div style={{display:"flex",gap:10}}>
-                    <input type="datetime-local" value={nf.startDateTime} onChange={e=>setNf(f=>({...f,startDateTime:e.target.value}))} style={{flex:1,...(nf.autoFilled&&nf.startDateTime?{borderColor:"#00D4AA",color:"#00D4AA"}:{})}}/>
-                    <button className="bg" style={{whiteSpace:"nowrap",padding:"10px 14px"}} onClick={()=>{const l=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,16);setNf(f=>({...f,startDateTime:l}));}}>📍 Now</button>
+                    <input type="datetime-local" step="1" value={nf.startDateTime} onChange={e=>setNf(f=>({...f,startDateTime:e.target.value}))} style={{flex:1,...(nf.autoFilled&&nf.startDateTime?{borderColor:"#00D4AA",color:"#00D4AA"}:{})}}/>
+                    <button className="bg" style={{whiteSpace:"nowrap",padding:"10px 14px"}} onClick={()=>{const l=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,19);setNf(f=>({...f,startDateTime:l}));}}>📍 Now</button>
                   </div>
                   {nf.autoFilled&&nf.startDateTime&&<div className="readonly-note">✔ Auto-filled — click 📍 Now to use current time</div>}
                 </div>
