@@ -14,6 +14,7 @@ const sb = async (path, opts={}) => {
     try{ const j=JSON.parse(errText); errMsg=j.message||j.hint||j.details||errText; }catch{}
     throw new Error(errMsg);
   }
+  if (res.status === 204) return [];
   const t = await res.text(); return t ? JSON.parse(t) : [];
 };
 const sbAll = async (table, query="") => {
@@ -1480,7 +1481,7 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
     if(failedRows.length>0) setTimeout(()=>showToast("Error: "+failedRows[0],"error"),3600);
     setSaving(false);
   };
-  const delPlanned=async id=>{ try{ await db.deletePlanned(id); setPlanned(p=>p.filter(x=>x.id!==id)); showToast("Removed."); }catch{showToast("Failed.","error");} };
+  const delPlanned=async id=>{ try{ await db.deletePlanned(id); setPlanned(p=>p.filter(x=>x.id!==id)); showToast("Removed."); }catch(e){showToast("Failed: "+e.message,"error"); console.error("deletePlanned error:",e);} };
 
   const filtItems=itemSearch.trim()?items.filter(i=>i.id.toLowerCase().includes(itemSearch.toLowerCase())||i.name.toLowerCase().includes(itemSearch.toLowerCase())):items;
   const statusColor={pending:"#7B8CFF",started:"#FFC107",completed:"#00D4AA"};
