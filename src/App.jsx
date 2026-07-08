@@ -253,6 +253,7 @@ function ProductionScheduler({user,onLogout}){
   // new order
   const [nf,setNf]=useState({selectedEmployees:[],orderNumber:"",itemId:"",lineId:"",productionQty:"",startDateTime:"",autoFilled:false});
   const [orderSearchQ,setOrderSearchQ]=useState("");
+  const [dupWarning,setDupWarning]=useState(null); // null | {status, order}
   const [orderSearching,setOrderSearching]=useState(false);
   // search
   const [sq,setSq]=useState(""); const [sr,setSr]=useState(null); const [snf,setSnf]=useState(false);
@@ -313,7 +314,14 @@ function ProductionScheduler({user,onLogout}){
   const handleOrderSearch=async()=>{
     if(!orderSearchQ.trim()){showToast("Enter an order number.","error");return;}
     setOrderSearching(true);
+    setDupWarning(null);
     try{
+      // Check if order already exists in loaded orders
+      const q=orderSearchQ.trim().toUpperCase();
+      const existing=orders.find(o=>o.order_number?.toUpperCase()===q);
+      if(existing){
+        setDupWarning({status:existing.status,order:existing});
+      }
       const r=await db.findPlanned(orderSearchQ.trim().toUpperCase());
       if(r.length){
         const p=r[0];
@@ -325,10 +333,10 @@ function ProductionScheduler({user,onLogout}){
         const matchedLine=findLine(lines, p.line_id);
         const resolvedLineId=matchedLine?matchedLine.id:(p.line_id||"");
         setNf(f=>({...f,orderNumber:p.order_number,itemId:p.item_id||"",lineId:resolvedLineId,productionQty:p.production_qty?String(p.production_qty):"",startDateTime:sdt,autoFilled:true}));
-        showToast("Order found — fields auto-filled!");
+        if(!existing) showToast("Order found — fields auto-filled!");
       } else {
         setNf(f=>({...f,orderNumber:orderSearchQ.trim().toUpperCase(),autoFilled:false}));
-        showToast("Order not in planned list — fill fields manually.","warn");
+        if(!existing) showToast("Order not in planned list — fill fields manually.","warn");
       }
     }catch(e){showToast("Search failed.","error");}
     setOrderSearching(false);
@@ -357,6 +365,7 @@ function ProductionScheduler({user,onLogout}){
       try{ const pl=await db.findPlanned(orderNumber); if(pl.length) await db.updatePlanned(pl[0].id,{status:"started"}); }catch{}
       setOrders(p=>[res[0],...p]);
       setNf({selectedEmployees:[],orderNumber:"",itemId:"",lineId:"",productionQty:"",startDateTime:"",autoFilled:false});
+      setDupWarning(null);
       setOrderSearchQ("");
       showToast(`Order ${orderNumber} started with ${numEmp} employee${numEmp>1?"s":""}!`);
       setView("dashboard");
@@ -552,7 +561,7 @@ function ProductionScheduler({user,onLogout}){
                     <input
                       placeholder="Type or scan order number"
                       value={orderSearchQ}
-                      onChange={e=>setOrderSearchQ(e.target.value.toUpperCase())}
+                      onChange={e=>{setOrderSearchQ(e.target.value.toUpperCase());setDupWarning(null);}}
                       onKeyDown={e=>e.key==="Enter"&&handleOrderSearch()}
                       style={{flex:1}}
                       disabled={orderSearching}
@@ -564,6 +573,30 @@ function ProductionScheduler({user,onLogout}){
                     Type manually · or use USB/Bluetooth barcode scanner (click field then scan — auto-searches on detect)
                   </div>
                 </div>
+                {dupWarning&&(
+                  <div style={{display:"flex",alignItems:"flex-start",gap:10,padding:"10px 14px",borderRadius:6,fontSize:11,marginBottom:10,
+                    ...(dupWarning.status==="Completed"
+                      ?{background:"rgba(255,75,110,.07)",border:"1px solid rgba(255,75,110,.25)",color:"#FF4B6E"}
+                      :{background:"rgba(255,193,7,.07)",border:"1px solid rgba(255,193,7,.25)",color:"#FFC107"}
+                    )}}>
+                    <span style={{fontSize:15,flexShrink:0}}>⚠</span>
+                    <div>
+                      <div style={{fontWeight:700,marginBottom:3}}>
+                        Order {dupWarning.order.order_number} is {dupWarning.status==="Completed"?"already Completed":"currently In Progress"}
+                      </div>
+                      <div style={{fontSize:10,opacity:.85}}>
+                        {dupWarning.status==="Completed"
+                          ?`Completed ${new Date(dupWarning.order.end_datetime).toLocaleString("en-NZ",{timeZone:NZ_TZ,day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hour12:true})}`
+                          ??"—"
+                          :`Started ${new Date(dupWarning.order.start_datetime).toLocaleString("en-NZ",{timeZone:NZ_TZ,day:"2-digit",month:"short",hour:"2-digit",minute:"2-digit",hour12:true})}`
+                        }
+                        {" · "}{(dupWarning.order.employees||[dupWarning.order.employee]).filter(Boolean).join(", ")}
+                        {dupWarning.order.line_name?" · "+dupWarning.order.line_name:""}
+                      </div>
+                      <div style={{fontSize:10,marginTop:4,opacity:.7}}>Starting again will create a duplicate record. Proceed only if intentional.</div>
+                    </div>
+                  </div>
+                )}
                 {nf.autoFilled&&<div className="autofill-banner">✔ Order found — fields auto-filled. Select employee(s) and confirm.</div>}
 
                 {/* Employees */}
@@ -814,7 +847,7 @@ function ProductionScheduler({user,onLogout}){
                               <td style={{padding:"8px 10px",textAlign:"center",color:"#7B8CFF"}}>{stdMin??<span style={{color:"#4A4F65"}}>—</span>}</td>
                               <td style={{padding:"8px 10px",textAlign:"center",color:"#C8CADC"}}>{o.actual_minutes!=null?Math.round(o.actual_minutes):<span style={{color:"#4A4F65"}}>—</span>}</td>
                               <td style={{padding:"8px 10px",textAlign:"center",color:"#FF9500"}}>{o.break_minutes?Math.round(o.break_minutes):<span style={{color:"#4A4F65"}}>0</span>}</td>
-                              <td style={{padding:"8px 10px",textAlign:"center",color:"#00D4AA"}}>{o.working_minutes!=null?Math.round(o.working_minutes):<span style={{color:"#4A4F65"}}>—</span>}</td>
+                              <td style={{padding:"8px 10px",textAlign:"center",color:"#00D4AA"}}>{o.working_minutes!=null?(Math.round(o.working_minutes*10)/10).toFixed(1):<span style={{color:"#4A4F65"}}>—</span>}</td>
                               <td style={{padding:"8px 10px",textAlign:"center"}}>
                                 {(()=>{
                                   if(o.working_minutes==null||!o.end_qty||o.end_qty<=0) return <span style={{color:"#4A4F65"}}>—</span>;
@@ -1127,7 +1160,7 @@ function OrderCard({order:o,item,onClose,onPause,onResume,onEditTimes,isAdmin}){
           ["Item",`${o.item_id} — ${o.item_name}`],
           ["Plan Qty",o.production_qty],
           ["Started",fmt(o.start_datetime)],
-          ...(o.status==="Completed"?[["Ended",fmt(o.end_datetime)],["End Qty",o.end_qty],["Work Min",Math.round(o.working_minutes||0)],["Break Min",Math.round(o.break_minutes||0)]]:
+          ...(o.status==="Completed"?[["Ended",fmt(o.end_datetime)],["End Qty",o.end_qty],["Work Min",(Math.round((o.working_minutes||0)*10)/10).toFixed(1)],["Break Min",Math.round(o.break_minutes||0)]]:
             [["Elapsed",getElap(o.start_datetime)],["Working",fmtMins(workMins)],["Break",fmtMins(totalBreakMins)]])
         ].map(([k,v])=>(
           <div key={k}><div style={{fontSize:8,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase"}}>{k}</div><div style={{fontSize:11,color:"#C8CADC",marginTop:2}}>{v}</div></div>
