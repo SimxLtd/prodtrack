@@ -408,7 +408,10 @@ function ProductionScheduler({user,onLogout}){
     setEditOrder(null);
   };
   const handleClose=async()=>{
-    if(!cf.endQty){showToast("Please enter ending quantity.","error");return;}
+    const endQty=Number(cf.endQty);
+    const planQty=cm?.production_qty||0;
+    if(!cf.endQty||endQty<=0){showToast("Please enter the ending quantity.","error");return;}
+    if(endQty<planQty&&!cf.remarks.trim()){showToast("End qty is below plan — please enter a reason in Remarks.","error");return;}
     setSaving(true);
     try{
       const item=items.find(i=>i.id===cm.item_id);
@@ -922,7 +925,15 @@ function ProductionScheduler({user,onLogout}){
       </div>
 
       {/* CLOSE MODAL */}
-      {cm&&(
+      {cm&&(()=>{
+        const endQty=Number(cf.endQty);
+        const planQty=cm.production_qty||0;
+        const hasQty=cf.endQty!=""&&endQty>0;
+        const isShort=hasQty&&endQty<planQty;
+        const isOver=hasQty&&endQty>planQty;
+        const needsReason=isShort&&!cf.remarks.trim();
+        const canClose=hasQty&&!needsReason;
+        return(
         <div className="mo" onClick={e=>e.target===e.currentTarget&&setCm(null)}>
           <div className="md au">
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:18}}>
@@ -934,19 +945,61 @@ function ProductionScheduler({user,onLogout}){
               <div style={{fontSize:12,color:"#8B90A8",marginTop:4}}>{cm.item_id} — {cm.item_name}</div>
               <div style={{fontSize:11,color:"#5A5F78",marginTop:2}}>Line: <span style={{color:"#7B8CFF"}}>{cm.line_id} — {cm.line_name}</span></div>
               <div style={{fontSize:11,color:"#5A5F78"}}>Employees: <span style={{color:"#C8CADC"}}>{cm.employees?.join(", ")||cm.employee}</span> <span style={{color:"#FF9500"}}>({cm.num_employees||1} 👥)</span></div>
-              <div style={{fontSize:11,color:"#5A5F78"}}>Plan Qty: <span style={{color:"#C8CADC"}}>{cm.production_qty}</span> | Breaks: <span style={{color:"#FF9500"}}>{(cm.breaks||[]).length} ({Math.round(cm.break_minutes||0)} min)</span></div>
+              <div style={{fontSize:11,color:"#5A5F78"}}>Plan Qty: <span style={{color:"#C8CADC",fontWeight:700}}>{planQty}</span> | Breaks: <span style={{color:"#FF9500"}}>{(cm.breaks||[]).length} ({Math.round(cm.break_minutes||0)} min)</span></div>
               {(()=>{const it=items.find(i=>i.id===cm.item_id); return it?.std_minutes?<div style={{fontSize:11,color:"#7B8CFF",marginTop:4}}>⏱ Std {it.std_minutes} min/piece × end_qty ÷ (working_mins × {cm.num_employees||1} emp) × 100</div>:null;})()}
             </div>
             <div className="fg"><label>End Date & Time (Auto)</label><input value={fmt(nowISO())} readOnly style={{color:"#00D4AA",opacity:.8}}/></div>
-            <div className="fg"><label>Ending Quantity *</label><input type="number" min="0" placeholder="Actual produced quantity" value={cf.endQty} onChange={e=>setCf(f=>({...f,endQty:e.target.value}))} autoFocus/></div>
-            <div className="fg"><label>Remarks</label><textarea rows={3} placeholder="Notes, issues, observations…" value={cf.remarks} onChange={e=>setCf(f=>({...f,remarks:e.target.value}))}/></div>
+
+            {/* End Quantity field with validation */}
+            <div className="fg">
+              <label>Ending Quantity <span style={{color:"#FF4B6E"}}>*</span></label>
+              <input type="number" min="0" placeholder="Actual produced quantity"
+                value={cf.endQty}
+                onChange={e=>setCf(f=>({...f,endQty:e.target.value}))}
+                autoFocus
+                style={!hasQty&&cf.endQty!==""?{borderColor:"#FF4B6E"}:isShort?{borderColor:"#FF9500"}:isOver?{borderColor:"#7B8CFF"}:hasQty?{borderColor:"#00D4AA"}:{}}
+              />
+              {!hasQty&&cf.endQty!==""&&<div style={{fontSize:10,color:"#FF4B6E",marginTop:4,display:"flex",alignItems:"center",gap:5}}>⚠ End quantity must be greater than 0</div>}
+              {isShort&&<div style={{fontSize:10,color:"#FF9500",marginTop:4,display:"flex",alignItems:"center",gap:5}}>⚠ End qty ({endQty}) is less than plan qty ({planQty}) — reason required below</div>}
+              {isOver&&<div style={{fontSize:10,color:"#7B8CFF",marginTop:4,display:"flex",alignItems:"center",gap:5}}>ℹ End qty ({endQty}) exceeds plan qty ({planQty})</div>}
+              {hasQty&&!isShort&&!isOver&&<div style={{fontSize:10,color:"#00D4AA",marginTop:4,display:"flex",alignItems:"center",gap:5}}>✔ Matches plan quantity</div>}
+            </div>
+
+            {/* Remarks field — required if short */}
+            <div className="fg">
+              <label>
+                Remarks
+                {isShort&&<span style={{color:"#FF4B6E",fontSize:10,fontWeight:700,letterSpacing:0,marginLeft:6}}>* required — qty below plan</span>}
+              </label>
+              <textarea rows={3}
+                placeholder={isShort?"Explain why end qty is below plan (e.g. material shortage, machine issue)…":"Notes, issues, observations…"}
+                value={cf.remarks}
+                onChange={e=>setCf(f=>({...f,remarks:e.target.value}))}
+                style={needsReason?{borderColor:"#FF4B6E"}:isShort&&cf.remarks.trim()?{borderColor:"#00D4AA"}:{}}
+              />
+              {needsReason&&<div style={{fontSize:10,color:"#FF4B6E",marginTop:4,display:"flex",alignItems:"center",gap:5}}>⚠ Please explain why end qty is below plan</div>}
+              {isShort&&cf.remarks.trim()&&<div style={{fontSize:10,color:"#00D4AA",marginTop:4,display:"flex",alignItems:"center",gap:5}}>✔ Reason provided</div>}
+            </div>
+
             <div style={{display:"flex",gap:10,marginTop:8}}>
-              <button className="bd" style={{flex:1,padding:12,fontSize:13}} onClick={handleClose} disabled={saving}>{saving?"Saving…":"⏹ CLOSE ORDER"}</button>
+              <button
+                onClick={handleClose}
+                disabled={saving||!canClose}
+                style={{flex:1,padding:12,fontSize:13,fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,border:"none",cursor:canClose?"pointer":"not-allowed",borderRadius:4,
+                  background:!canClose?"#2A2F45":isShort?"#FF9500":"#FF4B6E",
+                  color:!canClose?"#5A5F78":isShort?"#0F1117":"#FFFFFF",
+                  opacity:saving?0.6:1,
+                }}>
+                {saving?"Saving…":!hasQty?"⏹ CLOSE ORDER — Enter quantity first":needsReason?"⏹ CLOSE ORDER — Enter reason first":isShort?`⏹ CLOSE ORDER (${endQty} of ${planQty})`:"⏹ CLOSE ORDER"}
+              </button>
               <button className="bg" onClick={()=>setCm(null)}>Cancel</button>
             </div>
+            {!canClose&&hasQty&&needsReason&&<div style={{fontSize:9,color:"#FF9500",textAlign:"center",marginTop:6}}>Enter a reason for short quantity to enable closing</div>}
+            {!hasQty&&<div style={{fontSize:9,color:"#5A5F78",textAlign:"center",marginTop:6}}>Enter end quantity to enable closing</div>}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* EDIT TIMES MODAL (Admin only) */}
       {editOrder&&(
