@@ -411,6 +411,7 @@ function ProductionScheduler({user,onLogout}){
     const endQty=Number(cf.endQty);
     const planQty=cm?.production_qty||0;
     if(!cf.endQty||endQty<=0){showToast("Please enter the ending quantity.","error");return;}
+    if(endQty>planQty){showToast("End quantity cannot exceed plan quantity — please enter the correct quantity.","error");return;}
     if(endQty<planQty&&!cf.remarks.trim()){showToast("End qty is below plan — please enter a reason in Remarks.","error");return;}
     setSaving(true);
     try{
@@ -932,7 +933,7 @@ function ProductionScheduler({user,onLogout}){
         const isShort=hasQty&&endQty<planQty;
         const isOver=hasQty&&endQty>planQty;
         const needsReason=isShort&&!cf.remarks.trim();
-        const canClose=hasQty&&!needsReason;
+        const canClose=hasQty&&!needsReason&&!isOver;
         return(
         <div className="mo" onClick={e=>e.target===e.currentTarget&&setCm(null)}>
           <div className="md au">
@@ -957,11 +958,11 @@ function ProductionScheduler({user,onLogout}){
                 value={cf.endQty}
                 onChange={e=>setCf(f=>({...f,endQty:e.target.value}))}
                 autoFocus
-                style={!hasQty&&cf.endQty!==""?{borderColor:"#FF4B6E"}:isShort?{borderColor:"#FF9500"}:isOver?{borderColor:"#7B8CFF"}:hasQty?{borderColor:"#00D4AA"}:{}}
+                style={!hasQty&&cf.endQty!==""?{borderColor:"#FF4B6E"}:isShort?{borderColor:"#FF9500"}:isOver?{borderColor:"#FF4B6E"}:hasQty?{borderColor:"#00D4AA"}:{}}
               />
               {!hasQty&&cf.endQty!==""&&<div style={{fontSize:10,color:"#FF4B6E",marginTop:4,display:"flex",alignItems:"center",gap:5}}>⚠ End quantity must be greater than 0</div>}
               {isShort&&<div style={{fontSize:10,color:"#FF9500",marginTop:4,display:"flex",alignItems:"center",gap:5}}>⚠ End qty ({endQty}) is less than plan qty ({planQty}) — reason required below</div>}
-              {isOver&&<div style={{fontSize:10,color:"#7B8CFF",marginTop:4,display:"flex",alignItems:"center",gap:5}}>ℹ End qty ({endQty}) exceeds plan qty ({planQty})</div>}
+              {isOver&&<div style={{fontSize:10,color:"#FF4B6E",marginTop:4,display:"flex",alignItems:"center",gap:5}}>⚠ End qty ({endQty}) exceeds plan qty ({planQty}) — please enter the correct quantity</div>}
               {hasQty&&!isShort&&!isOver&&<div style={{fontSize:10,color:"#00D4AA",marginTop:4,display:"flex",alignItems:"center",gap:5}}>✔ Matches plan quantity</div>}
             </div>
 
@@ -990,11 +991,12 @@ function ProductionScheduler({user,onLogout}){
                   color:!canClose?"#5A5F78":isShort?"#0F1117":"#FFFFFF",
                   opacity:saving?0.6:1,
                 }}>
-                {saving?"Saving…":!hasQty?"⏹ CLOSE ORDER — Enter quantity first":needsReason?"⏹ CLOSE ORDER — Enter reason first":isShort?`⏹ CLOSE ORDER (${endQty} of ${planQty})`:"⏹ CLOSE ORDER"}
+                {saving?"Saving…":!hasQty?"⏹ CLOSE ORDER — Enter quantity first":isOver?"⏹ CLOSE ORDER — Correct qty first":needsReason?"⏹ CLOSE ORDER — Enter reason first":isShort?`⏹ CLOSE ORDER (${endQty} of ${planQty})`:"⏹ CLOSE ORDER"}
               </button>
               <button className="bg" onClick={()=>setCm(null)}>Cancel</button>
             </div>
             {!canClose&&hasQty&&needsReason&&<div style={{fontSize:9,color:"#FF9500",textAlign:"center",marginTop:6}}>Enter a reason for short quantity to enable closing</div>}
+            {!canClose&&isOver&&<div style={{fontSize:9,color:"#FF4B6E",textAlign:"center",marginTop:6}}>End quantity cannot exceed plan quantity</div>}
             {!hasQty&&<div style={{fontSize:9,color:"#5A5F78",textAlign:"center",marginTop:6}}>Enter end quantity to enable closing</div>}
           </div>
         </div>
