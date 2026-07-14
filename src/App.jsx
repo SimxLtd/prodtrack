@@ -1264,6 +1264,8 @@ function OrderCard({order:o,item,onClose,onPause,onResume,onEditTimes,isAdmin}){
 function toLocalInput(dt){ if(!dt) return ""; return new Date(dt).toLocaleString("sv",{timeZone:NZ_TZ}).slice(0,16).replace(" ","T"); }
 
 function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
+  const [orderNum,setOrderNum]=useState(o.order_number||"");
+  const [endQtyEdit,setEndQtyEdit]=useState(o.end_qty!=null?String(o.end_qty):"");
   const [startDT,setStartDT]=useState(toLocalInput(o.start_datetime));
   const [endDT,setEndDT]=useState(o.end_datetime?toLocalInput(o.end_datetime):"");
   const [breaks,setBreaks]=useState((o.breaks||[]).map(b=>({...b,startInput:toLocalInput(b.start),endInput:toLocalInput(b.end)})));
@@ -1282,15 +1284,18 @@ function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
   const totalBreakMins=breaks.reduce((a,b)=>a+(b.minutes||0),0);
   const totalElapsed=endDT?Math.max(0,(new Date(endDT)-new Date(startDT))/60000):null;
   const newWorkMins=totalElapsed!=null?Math.max(0,totalElapsed-totalBreakMins):null;
-  const newEff=newWorkMins!=null?calcEff(item?.std_minutes,o.end_qty,newWorkMins,o.num_employees||1):null;
+  const resolvedEndQty=endQtyEdit!==""?Number(endQtyEdit):o.end_qty;
+  const newEff=newWorkMins!=null?calcEff(item?.std_minutes,resolvedEndQty,newWorkMins,o.num_employees||1):null;
 
   const handleSave=async()=>{
     if(!reason.trim()){showToast("Please provide a reason for this edit.","error");return;}
+    if(!orderNum.trim()){showToast("Order number cannot be empty.","error");return;}
     setSaving(true);
     try{
-      const beforeData={start_datetime:o.start_datetime,end_datetime:o.end_datetime,breaks:o.breaks,break_minutes:o.break_minutes,working_minutes:o.working_minutes,actual_minutes:o.actual_minutes,efficiency:o.efficiency};
+      const beforeData={order_number:o.order_number,end_qty:o.end_qty,start_datetime:o.start_datetime,end_datetime:o.end_datetime,breaks:o.breaks,break_minutes:o.break_minutes,working_minutes:o.working_minutes,actual_minutes:o.actual_minutes,efficiency:o.efficiency};
       const newBreaksArr=breaks.map(b=>({start:new Date(b.startInput).toISOString(),end:new Date(b.endInput).toISOString(),minutes:b.minutes}));
       const patch={
+        order_number:orderNum.trim().toUpperCase(),
         start_datetime:new Date(startDT).toISOString(),
         breaks:newBreaksArr,
         break_minutes:totalBreakMins,
@@ -1302,67 +1307,125 @@ function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
         patch.working_minutes=Math.round(newWorkMins*10)/10;
         patch.efficiency=newEff;
       }
+      if(endQtyEdit!==""&&Number(endQtyEdit)!==o.end_qty){
+        patch.end_qty=Number(endQtyEdit);
+        if(newWorkMins!=null) patch.efficiency=newEff;
+      }
       await db.updateOrder(o.id,patch);
-      const afterData={...patch};
-      await db.addOrderEdit({order_id:o.id,order_number:o.order_number,edited_by:user.username,reason:reason.trim(),before_data:beforeData,after_data:afterData});
-      showToast(`Order ${o.order_number} times updated.`);
+      await db.addOrderEdit({order_id:o.id,order_number:patch.order_number,edited_by:user.username,reason:reason.trim(),before_data:beforeData,after_data:patch});
+      showToast(`Order ${patch.order_number} updated.`);
       onSaved({...o,...patch});
     }catch(e){showToast("Failed to save: "+e.message,"error");}
     setSaving(false);
   };
 
+  const S={inp:{background:"#13161F",border:"1px solid #2A2F45",color:"#E8EAF0",fontFamily:"'IBM Plex Mono',monospace",fontSize:11,padding:"7px 9px",borderRadius:4,width:"100%"},
+    lbl:{display:"block",fontSize:9,color:"#8B90A8",letterSpacing:1,textTransform:"uppercase",marginBottom:4},
+    secLbl:{display:"block",fontSize:8,color:"#5A5F78",letterSpacing:2,textTransform:"uppercase",marginBottom:7},
+    row2:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8},
+    hint:{fontSize:9,color:"#5A5F78",marginTop:3},
+    preview:{background:"#13161F",borderRadius:5,padding:"8px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"},
+  };
+
   return(
     <div className="mo" onClick={e=>e.target===e.currentTarget&&onClose()}>
-      <div className="md au" style={{maxWidth:560}}>
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:16}}>
-          <h3 style={{fontSize:14,color:"#FF9500",letterSpacing:1}}>🕐 EDIT ORDER TIMES — {o.order_number}</h3>
-          <button className="bg" style={{padding:"4px 10px"}} onClick={onClose}>✕</button>
+      <div className="md au" style={{maxWidth:600,padding:16}}>
+
+        {/* Header */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+          <h3 style={{fontSize:12,color:"#FF9500",letterSpacing:1,fontWeight:700}}>🕐 EDIT ORDER — {o.order_number}</h3>
+          <button className="bg" style={{padding:"3px 8px",fontSize:11}} onClick={onClose}>✕</button>
         </div>
 
-        <div style={{background:"rgba(255,149,0,.07)",border:"1px solid rgba(255,149,0,.2)",borderRadius:6,padding:"10px 14px",marginBottom:16,fontSize:11,color:"#FF9500",display:"flex",alignItems:"flex-start",gap:8}}>
-          <span>⚠</span><span>Editing times affects efficiency calculation. Use only to correct missed pause/resume actions. This change will be logged.</span>
+        {/* Warning */}
+        <div style={{background:"rgba(255,149,0,.07)",border:"1px solid rgba(255,149,0,.2)",borderRadius:5,padding:"8px 12px",marginBottom:12,fontSize:10,color:"#FF9500",display:"flex",alignItems:"flex-start",gap:7,lineHeight:1.5}}>
+          <span>⚠</span><span>Editing affects records and efficiency. All changes are logged with reason.</span>
         </div>
 
-        <div className="fg"><label>Start Date & Time</label><input type="datetime-local" value={startDT} onChange={e=>setStartDT(e.target.value)}/></div>
-
-        <div className="fg">
-          <label>End Date & Time {o.status!=="Completed"&&<span style={{color:"#5A5F78",fontSize:10,letterSpacing:0}}>(only editable for completed orders)</span>}</label>
-          <input type="datetime-local" value={endDT} onChange={e=>setEndDT(e.target.value)} disabled={o.status!=="Completed"} style={o.status!=="Completed"?{opacity:.4}:{}}/>
+        {/* Section 1: Order Details (NEW) */}
+        <span style={S.secLbl}>Order Details <span style={{background:"rgba(255,149,0,.1)",color:"#FF9500",border:"1px solid rgba(255,149,0,.2)",fontSize:7,padding:"1px 5px",borderRadius:6,fontWeight:700,marginLeft:5,verticalAlign:"middle"}}>NEW</span></span>
+        <div style={S.row2}>
+          <div>
+            <label style={S.lbl}>Order Number</label>
+            <input value={orderNum} onChange={e=>setOrderNum(e.target.value.toUpperCase())}
+              style={{...S.inp,borderColor:"#FF9500",background:"rgba(255,149,0,.04)"}}/>
+            <div style={S.hint}>⚠ Updates order number permanently</div>
+          </div>
+          <div>
+            <label style={S.lbl}>End Qty {o.status!=="Completed"&&<span style={{color:"#5A5F78",fontSize:8}}>(completed only)</span>}</label>
+            <input type="number" min="0"
+              value={endQtyEdit}
+              onChange={e=>setEndQtyEdit(e.target.value)}
+              disabled={o.status!=="Completed"}
+              style={{...S.inp,borderColor:"#FF9500",background:"rgba(255,149,0,.04)",...(o.status!=="Completed"?{opacity:.4}:{})}}/>
+            <div style={S.hint}>Plan qty: {o.production_qty||"—"} · recalculates efficiency</div>
+          </div>
         </div>
 
-        <label style={{display:"block",fontSize:11,color:"#8B90A8",marginBottom:8,letterSpacing:1,textTransform:"uppercase"}}>Break Log <span style={{color:"#7B8CFF",fontSize:10,letterSpacing:0,textTransform:"none"}}>— edit, add, or remove missed breaks</span></label>
+        <div style={{height:1,background:"#2A2F45",margin:"10px 0"}}/>
+
+        {/* Section 2: Times */}
+        <span style={S.secLbl}>Times</span>
+        <div style={S.row2}>
+          <div>
+            <label style={S.lbl}>Start Date & Time</label>
+            <input type="datetime-local" value={startDT} onChange={e=>setStartDT(e.target.value)} style={S.inp}/>
+          </div>
+          <div>
+            <label style={S.lbl}>End Date & Time {o.status!=="Completed"&&<span style={{color:"#5A5F78",fontSize:8}}>(completed only)</span>}</label>
+            <input type="datetime-local" value={endDT} onChange={e=>setEndDT(e.target.value)}
+              disabled={o.status!=="Completed"}
+              style={{...S.inp,...(o.status!=="Completed"?{opacity:.4}:{})}}/>
+          </div>
+        </div>
+
+        <div style={{height:1,background:"#2A2F45",margin:"10px 0"}}/>
+
+        {/* Section 3: Break log */}
+        <span style={S.secLbl}>Break Log <span style={{color:"#7B8CFF",fontSize:8,textTransform:"none",letterSpacing:0}}>— edit, add or remove missed breaks</span></span>
         {breaks.map((b,i)=>(
-          <div key={i} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
-            <span style={{color:"#FF9500",fontWeight:700,fontSize:11,width:55,flexShrink:0}}>Break {i+1}</span>
-            <input type="datetime-local" value={b.startInput} onChange={e=>updateBreak(i,"startInput",e.target.value)} style={{flex:1,minWidth:150,fontSize:11,padding:"7px 10px",borderColor:"#FF9500"}}/>
-            <span style={{color:"#5A5F78"}}>→</span>
-            <input type="datetime-local" value={b.endInput} onChange={e=>updateBreak(i,"endInput",e.target.value)} style={{flex:1,minWidth:150,fontSize:11,padding:"7px 10px",borderColor:"#FF9500"}}/>
-            <span style={{color:"#FF9500",fontSize:11,minWidth:50,textAlign:"right"}}>{Math.round(b.minutes||0)} min</span>
-            <button onClick={()=>removeBreak(i)} style={{background:"none",border:"none",color:"#FF4B6E",cursor:"pointer",fontSize:14,padding:"0 4px"}}>✕</button>
+          <div key={i} style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}>
+            <span style={{color:"#FF9500",fontWeight:700,fontSize:10,width:48,flexShrink:0}}>Break {i+1}</span>
+            <input type="datetime-local" value={b.startInput} onChange={e=>updateBreak(i,"startInput",e.target.value)}
+              style={{...S.inp,flex:1,minWidth:0,fontSize:10,padding:"6px 7px",borderColor:"#FF9500"}}/>
+            <span style={{color:"#5A5F78",fontSize:11}}>→</span>
+            <input type="datetime-local" value={b.endInput} onChange={e=>updateBreak(i,"endInput",e.target.value)}
+              style={{...S.inp,flex:1,minWidth:0,fontSize:10,padding:"6px 7px",borderColor:"#FF9500"}}/>
+            <span style={{color:"#FF9500",fontSize:10,width:42,textAlign:"right",flexShrink:0}}>{Math.round(b.minutes||0)} min</span>
+            <button onClick={()=>removeBreak(i)} style={{background:"none",border:"none",color:"#FF4B6E",cursor:"pointer",fontSize:13,padding:"0 2px",flexShrink:0}}>✕</button>
           </div>
         ))}
-        <button className="bg" onClick={addBreak} style={{fontSize:11,marginBottom:14}}>+ Add Missed Break</button>
+        <button className="bg" onClick={addBreak} style={{fontSize:10,padding:"4px 10px",marginBottom:10}}>+ Add Missed Break</button>
 
-        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"#13161F",borderRadius:6,marginBottom:14}}>
-          <span style={{fontSize:11,color:"#8B90A8"}}>Recalculated working time:</span>
-          <span style={{fontSize:15,fontWeight:700,color:"#00D4AA"}}>{newWorkMins!=null?fmtMins(newWorkMins):"— order still active —"}</span>
-        </div>
-        {newEff!=null&&(
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"10px 14px",background:"#13161F",borderRadius:6,marginBottom:14}}>
-            <span style={{fontSize:11,color:"#8B90A8"}}>Recalculated efficiency:</span>
-            <span style={{fontSize:15,fontWeight:700,color:effColor(newEff)}}>{newEff}%</span>
+        <div style={{height:1,background:"#2A2F45",margin:"10px 0"}}/>
+
+        {/* Section 4: Preview */}
+        <span style={S.secLbl}>Recalculated Preview</span>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+          <div style={S.preview}>
+            <span style={{fontSize:10,color:"#8B90A8"}}>Working time:</span>
+            <span style={{fontSize:13,fontWeight:700,color:"#00D4AA"}}>{newWorkMins!=null?fmtMins(newWorkMins):"— active —"}</span>
           </div>
-        )}
+          <div style={S.preview}>
+            <span style={{fontSize:10,color:"#8B90A8"}}>Efficiency:</span>
+            <span style={{fontSize:13,fontWeight:700,color:newEff!=null?effColor(newEff):"#5A5F78"}}>{newEff!=null?newEff+"%":"—"}</span>
+          </div>
+        </div>
 
-        <div className="fg"><label>Reason for edit <span style={{color:"#FF4B6E"}}>*required</span></label><input placeholder="e.g. Employee forgot to log lunch break" value={reason} onChange={e=>setReason(e.target.value)}/></div>
+        {/* Reason */}
+        <div style={{marginBottom:10}}>
+          <label style={S.lbl}>Reason for edit <span style={{color:"#FF4B6E"}}>*required</span></label>
+          <input style={S.inp} placeholder="e.g. Wrong end qty entered at close, corrected to 95" value={reason} onChange={e=>setReason(e.target.value)}/>
+        </div>
 
-        <div style={{display:"flex",gap:10,marginTop:8}}>
-          <button className="bp" onClick={handleSave} disabled={saving} style={{flex:1,padding:12}}>{saving?"Saving…":"✔ Save Changes"}</button>
+        {/* Buttons */}
+        <div style={{display:"flex",gap:8}}>
+          <button className="bp" onClick={handleSave} disabled={saving} style={{flex:1,padding:10,fontSize:11}}>{saving?"Saving…":"✔ Save Changes"}</button>
           <button className="bg" onClick={onClose}>Cancel</button>
         </div>
 
-        <div style={{background:"#13161F",border:"1px solid rgba(255,149,0,.2)",borderRadius:6,padding:"10px 14px",fontSize:10,color:"#8B90A8",lineHeight:1.7,marginTop:14}}>
-          📋 <strong style={{color:"#FF9500"}}>Audit trail:</strong> This edit will log who made the change, when, what was changed, and the reason given.
+        <div style={{background:"#13161F",border:"1px solid rgba(255,149,0,.2)",borderRadius:5,padding:"8px 12px",fontSize:9,color:"#8B90A8",lineHeight:1.6,marginTop:10}}>
+          📋 <strong style={{color:"#FF9500"}}>Audit trail:</strong> All changes (order number, end qty, times, breaks, reason) logged to pt_order_edits with before/after values.
         </div>
       </div>
     </div>
