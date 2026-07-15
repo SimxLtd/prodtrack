@@ -260,6 +260,13 @@ function ProductionScheduler({user,onLogout}){
   // close modal
   const [cm,setCm]=useState(null); const [cf,setCf]=useState({endQty:"",remarks:""});
   const [editOrder,setEditOrder]=useState(null);
+  const [swapOrder,setSwapOrder]=useState(null);
+  const openSwap=(o)=>setSwapOrder(o);
+  const handleSwapSaved=(updatedOrder)=>{
+    setOrders(p=>p.map(o=>o.id===updatedOrder.id?updatedOrder:o));
+    if(sr?.id===updatedOrder.id) setSr(updatedOrder);
+    setSwapOrder(null);
+  };
   // records
   const [fEmp,setFEmp]=useState("All"); const [fLine,setFLine]=useState("All"); const [fStatus,setFStatus]=useState("All"); const [fItem,setFItem]=useState("All"); const [fOrder,setFOrder]=useState(""); const [fItemSearch,setFItemSearch]=useState("");
   const [pageSize,setPageSize]=useState(50); const [curPage,setCurPage]=useState(1);
@@ -551,7 +558,7 @@ function ProductionScheduler({user,onLogout}){
         ):(
           <>
           {/* ═══ DASHBOARD ═══ */}
-          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} onEditTimes={openEditTimes} reload={loadAll} activeSearch={activeSearch} setActiveSearch={setActiveSearch} yearStats={yearStats}/>}
+          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} onEditTimes={openEditTimes} onSwap={openSwap} reload={loadAll} activeSearch={activeSearch} setActiveSearch={setActiveSearch} yearStats={yearStats}/>}
 
           {/* ═══ NEW ORDER ═══ */}
           {view==="new"&&(
@@ -1003,6 +1010,18 @@ function ProductionScheduler({user,onLogout}){
         );
       })()}
 
+      {/* SWAP EMPLOYEE MODAL (Admin only) */}
+      {swapOrder&&(
+        <SwapEmployeeModal
+          order={swapOrder}
+          employees={employees}
+          user={user}
+          onSaved={handleSwapSaved}
+          onClose={()=>setSwapOrder(null)}
+          showToast={showToast}
+        />
+      )}
+
       {/* EDIT TIMES MODAL (Admin only) */}
       {editOrder&&(
         <EditTimesModal
@@ -1028,7 +1047,7 @@ function ProductionScheduler({user,onLogout}){
 // ══════════════════════════════════════════════════════════════
 //  DASHBOARD
 // ══════════════════════════════════════════════════════════════
-function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,onEditTimes,reload,activeSearch,setActiveSearch,yearStats}){
+function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,onEditTimes,onSwap,reload,activeSearch,setActiveSearch,yearStats}){
   const td=new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});
   const toLocalDate=dt=>{if(!dt)return"";return new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});};
   const curMonth=td.slice(0,7); // YYYY-MM
@@ -1165,6 +1184,7 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
                 onPause={!o.is_paused?()=>onPause(o):null}
                 onResume={o.is_paused?()=>onResume(o):null}
                 onEditTimes={()=>onEditTimes(o)}
+                onSwap={()=>onSwap(o)}
                 isAdmin={isAdmin}
                 highlight={!!isMatch}
               />
@@ -1179,7 +1199,7 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
 // ══════════════════════════════════════════════════════════════
 //  ORDER CARD
 // ══════════════════════════════════════════════════════════════
-function OrderCard({order:o,item,onClose,onPause,onResume,onEditTimes,isAdmin}){
+function OrderCard({order:o,item,onClose,onPause,onResume,onEditTimes,onSwap,isAdmin}){
   const isPaused=o.is_paused;
   const statusLabel=isPaused?"On Break":o.status;
   const sc=STATUS_COLORS[statusLabel]||{dot:"#6C757D",bg:""};
@@ -1202,6 +1222,7 @@ function OrderCard({order:o,item,onClose,onPause,onResume,onEditTimes,isAdmin}){
         </div>
         <div style={{display:"flex",gap:6}}>
           {isAdmin&&onEditTimes&&<button onClick={onEditTimes} style={{background:"rgba(255,149,0,.1)",color:"#FF9500",border:"1px solid rgba(255,149,0,.3)",padding:"6px 12px",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:11,cursor:"pointer",borderRadius:4}}>🕐 Edit Times</button>}
+          {isAdmin&&onSwap&&o.status==="In Progress"&&<button onClick={onSwap} style={{background:"rgba(123,140,255,.1)",color:"#7B8CFF",border:"1px solid rgba(123,140,255,.3)",padding:"6px 12px",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:11,cursor:"pointer",borderRadius:4}}>👤 Swap</button>}
           {onResume&&<button className="bresume" onClick={onResume}>▶ Resume</button>}
           {onPause&&<button className="bpause" onClick={onPause}>⏸ Break</button>}
           {onClose&&<button className="bd" onClick={onClose} style={{fontSize:11,padding:"6px 12px"}}>⏹ End</button>}
@@ -1210,7 +1231,7 @@ function OrderCard({order:o,item,onClose,onPause,onResume,onEditTimes,isAdmin}){
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(150px,1fr))",gap:"5px 16px",marginBottom:10}}>
         {[
-          ["Employees",(o.employees?.join(", ")||o.employee)+((o.num_employees||1)>1?` (${o.num_employees}👥)`:"")],
+          ["Employees",null],
           ["Line",`${o.line_id} — ${o.line_name}`],
           ["Item",`${o.item_id} — ${o.item_name}`],
           ["Plan Qty",o.production_qty],
@@ -1218,7 +1239,22 @@ function OrderCard({order:o,item,onClose,onPause,onResume,onEditTimes,isAdmin}){
           ...(o.status==="Completed"?[["Ended",fmt(o.end_datetime)],["End Qty",o.end_qty],["Work Min",(Math.round((o.working_minutes||0)*10)/10).toFixed(1)],["Break Min",Math.round(o.break_minutes||0)]]:
             [["Elapsed",getElap(o.start_datetime)],["Working",fmtMins(workMins)],["Break",fmtMins(totalBreakMins)]])
         ].map(([k,v])=>(
-          <div key={k}><div style={{fontSize:8,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase"}}>{k}</div><div style={{fontSize:11,color:"#C8CADC",marginTop:2}}>{v}</div></div>
+          <div key={k}>
+            <div style={{fontSize:8,color:"#5A5F72",letterSpacing:1,textTransform:"uppercase"}}>{k}</div>
+            {k==="Employees"?(
+              <div style={{fontSize:11,marginTop:2}}>
+                {(o.employees||[o.employee]).filter(Boolean).map((e,i)=>(
+                  <span key={e} style={{color:i===0?"#00D4AA":"#FF9500",marginRight:4}}>
+                    {e}{i===0&&(o.employees||[]).length>1?<span style={{color:"#5A5F78",fontSize:9}}> (current)</span>:i>0?<span style={{color:"#5A5F78",fontSize:9}}> (prev)</span>:null}
+                    {i<(o.employees||[o.employee]).filter(Boolean).length-1?", ":""}
+                  </span>
+                ))}
+                {(o.num_employees||1)>1&&<span style={{color:"#FF9500",fontSize:10}}> ({o.num_employees}👥)</span>}
+              </div>
+            ):(
+              <div style={{fontSize:11,color:"#C8CADC",marginTop:2}}>{v}</div>
+            )}
+          </div>
         ))}
       </div>
 
@@ -1259,8 +1295,156 @@ function OrderCard({order:o,item,onClose,onPause,onResume,onEditTimes,isAdmin}){
 //  EMPLOYEE PICKER
 // ══════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════
-//  EDIT TIMES MODAL (Admin only)
+//  SWAP EMPLOYEE MODAL (Admin only, In Progress orders only)
 // ══════════════════════════════════════════════════════════════
+function SwapEmployeeModal({order:o,employees,user,onSaved,onClose,showToast}){
+  const currentEmps=o.employees||[o.employee].filter(Boolean);
+  const [selected,setSelected]=useState([...currentEmps]);
+  const [empSearch,setEmpSearch]=useState("");
+  const [partialQty,setPartialQty]=useState("");
+  const [reason,setReason]=useState("");
+  const [saving,setSaving]=useState(false);
+
+  const filtered=empSearch.trim()
+    ?employees.filter(e=>e.name.toUpperCase().includes(empSearch.trim().toUpperCase()))
+    :employees;
+
+  const toggle=(name)=>setSelected(p=>p.includes(name)?p.filter(x=>x!==name):[...p,name]);
+
+  const handleSave=async()=>{
+    if(!reason.trim()){showToast("Please provide a reason for the employee swap.","error");return;}
+    if(selected.length===0){showToast("Please select at least one employee.","error");return;}
+    setSaving(true);
+    try{
+      // Keep both old and new in employees array — new first, old after
+      // Remove duplicates, new selected first, then any previous not in selected
+      const newFirst=selected;
+      const prevNotSelected=currentEmps.filter(e=>!selected.includes(e));
+      const merged=[...newFirst,...prevNotSelected];
+      const patch={employees:merged,employee:merged[0],num_employees:o.num_employees||1,was_edited:true};
+      await db.updateOrder(o.id,patch);
+      await db.addOrderEdit({
+        order_id:o.id,order_number:o.order_number,
+        edited_by:user.username,
+        reason:`Employee swap: ${currentEmps.join(", ")} → ${selected.join(", ")}${partialQty?` · Partial qty at swap: ${partialQty}`:""} · ${reason.trim()}`,
+        before_data:{employees:currentEmps,num_employees:o.num_employees||1},
+        after_data:{employees:merged,num_employees:patch.num_employees},
+      });
+      showToast(`Employee updated on order ${o.order_number}.`);
+      onSaved({...o,...patch});
+    }catch(e){showToast("Failed to save: "+e.message,"error");}
+    setSaving(false);
+  };
+
+  const S={
+    inp:{background:"#13161F",border:"1px solid #2A2F45",color:"#E8EAF0",fontFamily:"'IBM Plex Mono',monospace",fontSize:11,padding:"7px 9px",borderRadius:4,width:"100%"},
+    lbl:{display:"block",fontSize:9,color:"#8B90A8",letterSpacing:1,textTransform:"uppercase",marginBottom:4},
+  };
+
+  return(
+    <div className="mo" onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div className="md au" style={{maxWidth:520,padding:16}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
+          <h3 style={{fontSize:12,color:"#7B8CFF",letterSpacing:1,fontWeight:700}}>👤 SWAP EMPLOYEE — {o.order_number}</h3>
+          <button className="bg" style={{padding:"3px 8px",fontSize:11}} onClick={onClose}>✕</button>
+        </div>
+
+        <div style={{background:"rgba(123,140,255,.07)",border:"1px solid rgba(123,140,255,.2)",borderRadius:5,padding:"8px 12px",marginBottom:12,fontSize:10,color:"#7B8CFF",lineHeight:1.5}}>
+          ℹ Order keeps running. Previous employee(s) stay in the record so both appear in efficiency reports.
+        </div>
+
+        {/* Current employees */}
+        <div style={{marginBottom:10}}>
+          <label style={S.lbl}>Current Employee(s)</label>
+          <div style={{background:"#13161F",border:"1px solid #2A2F45",borderRadius:4,padding:"8px 10px",display:"flex",flexWrap:"wrap",gap:5}}>
+            {currentEmps.map(e=>(
+              <span key={e} style={{background:"rgba(255,75,110,.08)",color:"#FF4B6E",border:"1px solid rgba(255,75,110,.2)",padding:"2px 9px",borderRadius:10,fontSize:10,fontWeight:700}}>{e}</span>
+            ))}
+          </div>
+        </div>
+
+        {/* New employee picker */}
+        <div style={{marginBottom:10}}>
+          <label style={S.lbl}>New Employee(s) <span style={{color:"#FF4B6E"}}>*</span></label>
+          <div style={{background:"#13161F",border:"1px solid #00D4AA",borderRadius:4,overflow:"hidden"}}>
+            <input
+              style={{...S.inp,borderRadius:0,borderBottom:"1px solid #2A2F45",padding:"7px 10px"}}
+              placeholder="Search employees…"
+              value={empSearch}
+              onChange={e=>setEmpSearch(e.target.value)}
+            />
+            <div style={{maxHeight:130,overflowY:"auto"}}>
+              {filtered.map(e=>{
+                const chk=selected.includes(e.name);
+                return(
+                  <div key={e.id} onClick={()=>toggle(e.name)}
+                    style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",cursor:"pointer",fontSize:11,borderBottom:"1px solid #1E2135",background:chk?"rgba(0,212,170,.07)":"transparent"}}
+                    onMouseEnter={ev=>ev.currentTarget.style.background=chk?"rgba(0,212,170,.1)":"rgba(255,255,255,.03)"}
+                    onMouseLeave={ev=>ev.currentTarget.style.background=chk?"rgba(0,212,170,.07)":"transparent"}>
+                    <div style={{width:13,height:13,borderRadius:3,border:`1px solid ${chk?"#00D4AA":"#3A3F55"}`,background:chk?"#00D4AA":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                      {chk&&<span style={{color:"#0F1117",fontSize:9,fontWeight:700}}>✓</span>}
+                    </div>
+                    <span style={{color:chk?"#00D4AA":"#C8CADC",fontWeight:chk?700:400}}>{e.name}</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          {selected.length>0&&(
+            <div style={{marginTop:6,display:"flex",flexWrap:"wrap",gap:4}}>
+              {selected.map(e=>(
+                <span key={e} style={{background:"rgba(0,212,170,.1)",color:"#00D4AA",border:"1px solid rgba(0,212,170,.25)",padding:"2px 9px",borderRadius:10,fontSize:10,fontWeight:700}}>✓ {e}</span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Partial qty + reason */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+          <div>
+            <label style={S.lbl}>Partial Qty So Far <span style={{color:"#5A5F78",fontSize:8}}>(optional)</span></label>
+            <input type="number" min="0" style={S.inp} placeholder="e.g. 75" value={partialQty} onChange={e=>setPartialQty(e.target.value)}/>
+            <div style={{fontSize:9,color:"#5A5F78",marginTop:3}}>Pieces done before handover — logged in audit</div>
+          </div>
+          <div>
+            <label style={S.lbl}>Reason <span style={{color:"#FF4B6E"}}>*</span></label>
+            <input style={S.inp} placeholder="e.g. Shift change, unwell…" value={reason} onChange={e=>setReason(e.target.value)}/>
+          </div>
+        </div>
+
+        {/* Preview */}
+        {selected.length>0&&(
+          <div style={{background:"#13161F",borderRadius:5,padding:"8px 12px",marginBottom:10,fontSize:10}}>
+            <div style={{color:"#5A5F78",marginBottom:5}}>After swap:</div>
+            <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+              {currentEmps.map(e=>(
+                <span key={e} style={{color:"#FF4B6E",textDecoration:"line-through",opacity:.7,fontSize:10}}>{e}</span>
+              ))}
+              <span style={{color:"#5A5F78"}}>→</span>
+              {selected.map(e=>(
+                <span key={e} style={{background:"rgba(0,212,170,.1)",color:"#00D4AA",border:"1px solid rgba(0,212,170,.25)",padding:"2px 9px",borderRadius:10,fontSize:10,fontWeight:700}}>{e}</span>
+              ))}
+              {currentEmps.filter(e=>!selected.includes(e)).length>0&&(
+                <span style={{fontSize:9,color:"#5A5F78"}}>+ {currentEmps.filter(e=>!selected.includes(e)).join(", ")} kept in record</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div style={{display:"flex",gap:8}}>
+          <button className="bp" onClick={handleSave} disabled={saving} style={{flex:1,padding:10,fontSize:11,background:"#7B8CFF",border:"none"}}>{saving?"Saving…":"👤 Confirm Swap"}</button>
+          <button className="bg" onClick={onClose}>Cancel</button>
+        </div>
+
+        <div style={{background:"#13161F",border:"1px solid rgba(123,140,255,.2)",borderRadius:5,padding:"8px 12px",fontSize:9,color:"#8B90A8",lineHeight:1.6,marginTop:10}}>
+          📋 <strong style={{color:"#7B8CFF"}}>Audit trail:</strong> Old → new employees, partial qty, reason and timestamp logged to pt_order_edits. Both employees appear in efficiency reports.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function toLocalInput(dt){ if(!dt) return ""; return new Date(dt).toLocaleString("sv",{timeZone:NZ_TZ}).slice(0,16).replace(" ","T"); }
 
 function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
