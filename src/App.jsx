@@ -1333,8 +1333,9 @@ function OrderCard({order:o,item,onClose,onPause,onResume,onEditTimes,onSwap,isA
             {k==="Employees"?(
               <div style={{fontSize:11,marginTop:2}}>
                 {(o.employees||[o.employee]).filter(Boolean).map((e,i)=>(
-                  <span key={e} style={{color:i===0?"#00D4AA":"#FF9500",marginRight:4}}>
-                    {e}{i===0&&(o.employees||[]).length>1?<span style={{color:"#5A5F78",fontSize:9}}> (current)</span>:i>0?<span style={{color:"#5A5F78",fontSize:9}}> (prev)</span>:null}
+                  <span key={e} style={{color:o.employee_segments?(i===0?"#00D4AA":"#FF9500"):"#C8CADC",marginRight:4}}>
+                    {e}
+                    {o.employee_segments&&(i===0?(o.employees||[]).length>1?<span style={{color:"#5A5F78",fontSize:9}}> (current)</span>:null:i>0?<span style={{color:"#5A5F78",fontSize:9}}> (prev)</span>:null)}
                     {i<(o.employees||[o.employee]).filter(Boolean).length-1?", ":""}
                   </span>
                 ))}
