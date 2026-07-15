@@ -1222,7 +1222,11 @@ function OrderCard({order:o,item,onClose,onPause,onResume,onEditTimes,onSwap,isA
         </div>
         <div style={{display:"flex",gap:6}}>
           {isAdmin&&onEditTimes&&<button onClick={onEditTimes} style={{background:"rgba(255,149,0,.1)",color:"#FF9500",border:"1px solid rgba(255,149,0,.3)",padding:"6px 12px",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:11,cursor:"pointer",borderRadius:4}}>🕐 Edit Times</button>}
-          {isAdmin&&onSwap&&o.status==="In Progress"&&<button onClick={onSwap} style={{background:"rgba(123,140,255,.1)",color:"#7B8CFF",border:"1px solid rgba(123,140,255,.3)",padding:"6px 12px",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:11,cursor:"pointer",borderRadius:4}}>👤 Swap</button>}
+          {isAdmin&&onSwap&&o.status==="In Progress"&&(
+            o.is_paused
+              ?<button onClick={onSwap} style={{background:"rgba(123,140,255,.15)",color:"#7B8CFF",border:"1px solid rgba(123,140,255,.4)",padding:"6px 12px",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:11,cursor:"pointer",borderRadius:4}}>👤 Swap</button>
+              :<span style={{fontSize:9,color:"#5A5F78",fontStyle:"italic",alignSelf:"center"}}>⏸ Pause to swap</span>
+          )}
           {onResume&&<button className="bresume" onClick={onResume}>▶ Resume</button>}
           {onPause&&<button className="bpause" onClick={onPause}>⏸ Break</button>}
           {onClose&&<button className="bd" onClick={onClose} style={{fontSize:11,padding:"6px 12px"}}>⏹ End</button>}
@@ -1306,7 +1310,7 @@ function SwapEmployeeModal({order:o,employees,user,onSaved,onClose,showToast}){
   const [saving,setSaving]=useState(false);
 
   const filtered=empSearch.trim()
-    ?employees.filter(e=>e.name.toUpperCase().includes(empSearch.trim().toUpperCase()))
+    ?employees.filter(e=>e.toUpperCase().includes(empSearch.trim().toUpperCase()))
     :employees;
 
   const toggle=(name)=>setSelected(p=>p.includes(name)?p.filter(x=>x!==name):[...p,name]);
@@ -1375,16 +1379,16 @@ function SwapEmployeeModal({order:o,employees,user,onSaved,onClose,showToast}){
             />
             <div style={{maxHeight:130,overflowY:"auto"}}>
               {filtered.map(e=>{
-                const chk=selected.includes(e.name);
+                const chk=selected.includes(e);
                 return(
-                  <div key={e.id} onClick={()=>toggle(e.name)}
+                  <div key={e} onClick={()=>toggle(e)}
                     style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",cursor:"pointer",fontSize:11,borderBottom:"1px solid #1E2135",background:chk?"rgba(0,212,170,.07)":"transparent"}}
                     onMouseEnter={ev=>ev.currentTarget.style.background=chk?"rgba(0,212,170,.1)":"rgba(255,255,255,.03)"}
                     onMouseLeave={ev=>ev.currentTarget.style.background=chk?"rgba(0,212,170,.07)":"transparent"}>
                     <div style={{width:13,height:13,borderRadius:3,border:`1px solid ${chk?"#00D4AA":"#3A3F55"}`,background:chk?"#00D4AA":"transparent",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
                       {chk&&<span style={{color:"#0F1117",fontSize:9,fontWeight:700}}>✓</span>}
                     </div>
-                    <span style={{color:chk?"#00D4AA":"#C8CADC",fontWeight:chk?700:400}}>{e.name}</span>
+                    <span style={{color:chk?"#00D4AA":"#C8CADC",fontWeight:chk?700:400}}>{e}</span>
                   </div>
                 );
               })}
