@@ -674,12 +674,12 @@ function ProductionScheduler({user,onLogout}){
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
                   <div className="fg">
                     <label>Order Number *</label>
-                    <input placeholder="ORD-2025-001" value={nf.orderNumber} className={nf.orderNumber?"f-filled":"f-empty"} onChange={e=>setNf(f=>({...f,orderNumber:e.target.value.toUpperCase(),autoFilled:false}))} style={nf.autoFilled?{borderColor:"#00D4AA",color:"#00D4AA"}:{}}/>
+                    <input placeholder="ORD-2025-001" value={nf.orderNumber} className={nf.orderNumber?"f-filled":"f-empty"} onChange={e=>setNf(f=>({...f,orderNumber:e.target.value.toUpperCase(),autoFilled:false}))}/>
                     {nf.autoFilled&&<div className="readonly-note">✔ Auto-filled</div>}
                   </div>
                   <div className="fg">
                     <label>Production Qty *</label>
-                    <input type="number" min="1" placeholder="0" value={nf.productionQty} className={nf.productionQty?"f-filled":"f-empty"} onChange={e=>setNf(f=>({...f,productionQty:e.target.value}))} style={nf.autoFilled?{borderColor:"#00D4AA",color:"#00D4AA"}:{}}/>
+                    <input type="number" min="1" placeholder="0" value={nf.productionQty} className={nf.productionQty?"f-filled":"f-empty"} onChange={e=>setNf(f=>({...f,productionQty:e.target.value}))}/>
                     {nf.autoFilled&&<div className="readonly-note">✔ Auto-filled</div>}
                   </div>
                 </div>
@@ -1245,7 +1245,7 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
         </div>
       </div>
       {/* Search bar */}
-      <div className={activeSearch?"f-filled":"f-empty"} style={{display:"flex",alignItems:"center",gap:10,background:"#13161F",borderRadius:7,padding:"8px 14px",marginBottom:12,transition:"border .15s"}}>
+      <div style={{display:"flex",alignItems:"center",gap:10,background:"#13161F",border:`1px solid ${activeSearch?"#C8CADC":"#00D4AA"}`,borderRadius:7,padding:"8px 14px",marginBottom:12,transition:"border .15s"}}>
         <span style={{color:"#5A5F78",fontSize:14,flexShrink:0}}>🔍</span>
         <input
           placeholder="Search active orders by order number or employee…"
@@ -1806,7 +1806,7 @@ function ItemSearch({items,value,onChange,filled}){
   },[]);
   return(
     <div ref={ref} style={{position:"relative"}}>
-      <div onClick={()=>setOpen(o=>!o)} className={value?"f-filled":"f-empty"} style={{background:"#1A1D27",borderRadius:4,padding:"10px 14px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,color:selected?"#E8EAF0":"#4A4F65"}}>
+      <div onClick={()=>setOpen(o=>!o)} style={{background:"#1A1D27",border:`1px solid ${value?"#C8CADC":"#00D4AA"}`,borderRadius:4,padding:"10px 14px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,color:selected?"#E8EAF0":"#4A4F65"}}>
         <span>{selected?`${selected.id} — ${selected.name}`:"— Select Item —"}</span>
         <span style={{color:"#5A5F78",fontSize:10}}>{open?"▲":"▼"}</span>
       </div>
