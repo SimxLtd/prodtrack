@@ -625,6 +625,7 @@ function ProductionScheduler({user,onLogout}){
                     <input
                       placeholder="Type or scan order number"
                       value={orderSearchQ}
+                      className={orderSearchQ?"f-filled":"f-empty"}
                       onChange={e=>{setOrderSearchQ(e.target.value.toUpperCase());setDupWarning(null);}}
                       onKeyDown={e=>e.key==="Enter"&&handleOrderSearch()}
                       style={{flex:1}}
@@ -694,7 +695,7 @@ function ProductionScheduler({user,onLogout}){
 
                 <div className="fg">
                   <label>Item Number *</label>
-                  <ItemSearch items={items} value={nf.itemId} onChange={v=>setNf(f=>({...f,itemId:v}))} filled={nf.autoFilled&&!!nf.itemId}/>
+                  <ItemSearch items={items} value={nf.itemId} onChange={v=>setNf(f=>({...f,itemId:v}))} filled={!!nf.itemId}/>
                   {nf.autoFilled&&nf.itemId&&<div className="readonly-note">✔ Auto-filled</div>}
                   {nf.itemId&&(()=>{
                     const it=items.find(i=>i.id===nf.itemId);
@@ -1244,7 +1245,7 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
         </div>
       </div>
       {/* Search bar */}
-      <div style={{display:"flex",alignItems:"center",gap:10,background:"#13161F",border:"1px solid #2A2F45",borderRadius:7,padding:"8px 14px",marginBottom:12,transition:"border .15s",...(activeSearch?{borderColor:"rgba(0,212,170,.35)"}:{})}}>
+      <div className={activeSearch?"f-filled":"f-empty"} style={{display:"flex",alignItems:"center",gap:10,background:"#13161F",borderRadius:7,padding:"8px 14px",marginBottom:12,transition:"border .15s"}}>
         <span style={{color:"#5A5F78",fontSize:14,flexShrink:0}}>🔍</span>
         <input
           placeholder="Search active orders by order number or employee…"
@@ -1805,7 +1806,7 @@ function ItemSearch({items,value,onChange,filled}){
   },[]);
   return(
     <div ref={ref} style={{position:"relative"}}>
-      <div onClick={()=>setOpen(o=>!o)} style={{background:"#1A1D27",border:`1px solid ${open?"#00D4AA":filled?"#00D4AA":"#2A2F45"}`,borderRadius:4,padding:"10px 14px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,color:selected?(filled?"#00D4AA":"#E8EAF0"):"#4A4F65"}}>
+      <div onClick={()=>setOpen(o=>!o)} className={value?"f-filled":"f-empty"} style={{background:"#1A1D27",borderRadius:4,padding:"10px 14px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:13,color:selected?"#E8EAF0":"#4A4F65"}}>
         <span>{selected?`${selected.id} — ${selected.name}`:"— Select Item —"}</span>
         <span style={{color:"#5A5F78",fontSize:10}}>{open?"▲":"▼"}</span>
       </div>
