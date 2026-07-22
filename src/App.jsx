@@ -1579,7 +1579,7 @@ function SwapEmployeeModal({order:o,employees,user,onSaved,onClose,showToast}){
 }
 
 
-function toLocalInput(dt){ if(!dt) return ""; return new Date(dt).toLocaleString("sv",{timeZone:NZ_TZ}).slice(0,16).replace(" ","T"); }
+function toLocalInput(dt){ if(!dt) return ""; return new Date(dt).toLocaleString("sv",{timeZone:NZ_TZ}).slice(0,19).replace(" ","T"); }
 
 function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
   const [orderNum,setOrderNum]=useState(o.order_number||"");
@@ -1595,7 +1595,7 @@ function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
   const updateBreak=(i,field,val)=>setBreaks(p=>p.map((b,idx)=>{
     if(idx!==i) return b;
     const nb={...b,[field]:val};
-    if(nb.startInput&&nb.endInput) nb.minutes=Math.max(0,Math.round((new Date(nb.endInput)-new Date(nb.startInput))/60000));
+    if(nb.startInput&&nb.endInput) nb.minutes=Math.max(0,Math.round((new Date(nb.endInput)-new Date(nb.startInput))/6000)/10);
     return nb;
   }));
 
@@ -1687,11 +1687,11 @@ function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
         <div style={S.row2}>
           <div>
             <label style={S.lbl}>Start Date & Time</label>
-            <input type="datetime-local" value={startDT} onChange={e=>setStartDT(e.target.value)} style={S.inp}/>
+            <input type="datetime-local" step="1" value={startDT} onChange={e=>setStartDT(e.target.value)} style={S.inp}/>
           </div>
           <div>
             <label style={S.lbl}>End Date & Time {o.status!=="Completed"&&<span style={{color:"#5A5F78",fontSize:8}}>(completed only)</span>}</label>
-            <input type="datetime-local" value={endDT} onChange={e=>setEndDT(e.target.value)}
+            <input type="datetime-local" step="1" value={endDT} onChange={e=>setEndDT(e.target.value)}
               disabled={o.status!=="Completed"}
               style={{...S.inp,...(o.status!=="Completed"?{opacity:.4}:{})}}/>
           </div>
@@ -1704,10 +1704,10 @@ function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
         {breaks.map((b,i)=>(
           <div key={i} style={{display:"flex",alignItems:"center",gap:5,marginBottom:6}}>
             <span style={{color:"#FF9500",fontWeight:700,fontSize:10,width:48,flexShrink:0}}>Break {i+1}</span>
-            <input type="datetime-local" value={b.startInput} onChange={e=>updateBreak(i,"startInput",e.target.value)}
+            <input type="datetime-local" step="1" value={b.startInput} onChange={e=>updateBreak(i,"startInput",e.target.value)}
               style={{...S.inp,flex:1,minWidth:0,fontSize:10,padding:"6px 7px",borderColor:"#FF9500"}}/>
             <span style={{color:"#5A5F78",fontSize:11}}>→</span>
-            <input type="datetime-local" value={b.endInput} onChange={e=>updateBreak(i,"endInput",e.target.value)}
+            <input type="datetime-local" step="1" value={b.endInput} onChange={e=>updateBreak(i,"endInput",e.target.value)}
               style={{...S.inp,flex:1,minWidth:0,fontSize:10,padding:"6px 7px",borderColor:"#FF9500"}}/>
             <span style={{color:"#FF9500",fontSize:10,width:42,textAlign:"right",flexShrink:0}}>{Math.round(b.minutes||0)} min</span>
             <button onClick={()=>removeBreak(i)} style={{background:"none",border:"none",color:"#FF4B6E",cursor:"pointer",fontSize:13,padding:"0 2px",flexShrink:0}}>✕</button>
