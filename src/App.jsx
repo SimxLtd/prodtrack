@@ -1419,24 +1419,41 @@ function SwapEmployeeModal({order:o,employees,user,onSaved,onClose,showToast}){
     setSaving(true);
     try{
       // Keep both old and new in employees array — new first, old after
-      // Remove duplicates, new selected first, then any previous not in selected
       const newFirst=selected;
       const prevNotSelected=currentEmps.filter(e=>!selected.includes(e));
       const merged=[...newFirst,...prevNotSelected];
 
-      // Build employee_segments — record segment 1 (before swap) with partial qty and time so far
+      // ── Build employee_segments with two rules ──
       const existingSegs=o.employee_segments||[];
-      const swapTimeMs=Date.now();
+      const lastSeg=existingSegs[existingSegs.length-1];
+      const isReplacing=existingSegs.length>0&&lastSeg&&lastSeg.working_minutes===null&&o.is_paused;
+
+      // Rule 1: working minutes capped at paused_at — NOT at swap-click time
+      // Break time is never counted as working time
+      const pausedAtMs=new Date(o.paused_at).getTime();
       const startMs=new Date(o.start_datetime).getTime();
-      const totalElapsedMins=(swapTimeMs-startMs)/60000;
-      const breakMins=o.break_minutes||0;
-      // Current segment working minutes = elapsed so far minus breaks
-      const seg1WorkingMins=Math.max(0,totalElapsedMins-breakMins);
-      const newSegments=[
-        ...existingSegs,
-        {num_employees:o.num_employees||1, partial_qty:partialQty?Number(partialQty):null, working_minutes:Math.round(seg1WorkingMins*10)/10},
-        {num_employees:selected.length, partial_qty:null, working_minutes:null}, // completed at close
-      ];
+      const prevCompletedWorkMins=existingSegs
+        .filter(s=>s.working_minutes!==null)
+        .reduce((a,s)=>a+(s.working_minutes||0),0);
+      const thisSegWorkMins=Math.max(0,
+        (pausedAtMs-startMs)/60000 - (o.break_minutes||0) - prevCompletedWorkMins
+      );
+
+      let newSegments;
+      if(isReplacing){
+        // Rule 2: another swap during same pause — replace last placeholder, keep seg working_minutes locked
+        newSegments=[
+          ...existingSegs.slice(0,-1),
+          {num_employees:selected.length, partial_qty:partialQty?Number(partialQty):null, working_minutes:null},
+        ];
+      } else {
+        // First swap during this pause — lock current segment and add new placeholder
+        newSegments=[
+          ...existingSegs,
+          {num_employees:o.num_employees||1, partial_qty:partialQty?Number(partialQty):null, working_minutes:Math.round(thisSegWorkMins*10)/10},
+          {num_employees:selected.length, partial_qty:null, working_minutes:null},
+        ];
+      }
 
       const patch={employees:merged,employee:merged[0],num_employees:selected.length,employee_segments:newSegments,was_edited:true};
       await db.updateOrder(o.id,patch);
