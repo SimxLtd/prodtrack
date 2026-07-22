@@ -1022,10 +1022,6 @@ function ProductionScheduler({user,onLogout}){
           const totalMins=minsTo(cm.start_datetime,nowISO());
           const workMins=Math.max(totalMins-(cm.break_minutes||0),0.1);
           return calcEff(stdMin,endQty,workMins,cm.num_employees||1);
-          }
-          const totalMins=minsTo(cm.start_datetime,nowISO());
-          const workMins=Math.max(totalMins-(cm.break_minutes||0),0.1);
-          return calcEff(stdMin,endQty,workMins,cm.num_employees||1);
         })();
 
         return(
