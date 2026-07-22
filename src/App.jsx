@@ -432,31 +432,42 @@ function ProductionScheduler({user,onLogout}){
       let finalSegments=null;
 
       if(cm.employee_segments&&cm.employee_segments.length>0){
-        // ── Segmented efficiency ──
-        // All segments except last are complete (partial_qty and working_minutes known)
-        // Last segment gets remaining qty and remaining working minutes
-        const segs=cm.employee_segments;
-        const completedSegs=segs.slice(0,-1); // all but last
+        // ── Segmented efficiency (employee swap occurred) ──
+        // prototype logic: sum(std×qty) ÷ sum(work_min×num_emp) × 100 per segment
+        const segs=[...cm.employee_segments];
         const lastSeg={...segs[segs.length-1]};
 
-        // Working minutes already accounted for in completed segments
+        // All completed segments (all except last)
+        const completedSegs=segs.slice(0,-1);
         const completedWorkMins=completedSegs.reduce((a,s)=>a+(s.working_minutes||0),0);
-        const lastWorkMins=Math.max(0,workMins-completedWorkMins);
-
-        // Partial qty already accounted for in completed segments
         const completedQty=completedSegs.reduce((a,s)=>a+(s.partial_qty||0),0);
-        const lastQty=Math.max(0,endQty-completedQty);
 
-        lastSeg.working_minutes=Math.round(lastWorkMins*10)/10;
-        lastSeg.partial_qty=lastQty;
-        finalSegments=[...completedSegs,lastSeg];
+        // Fill last segment with remaining qty and remaining working time
+        lastSeg.partial_qty=Math.max(0,endQty-completedQty);
+        lastSeg.working_minutes=Math.round(Math.max(0,workMins-completedWorkMins)*10)/10;
 
+        const finalSegs=[...completedSegs,lastSeg];
+
+        // Collapse consecutive segments with same num_employees
+        // (handles multiple test swaps or re-swaps with same count)
+        const collapsed=[];
+        for(const seg of finalSegs){
+          const prev=collapsed[collapsed.length-1];
+          if(prev&&prev.num_employees===seg.num_employees){
+            prev.working_minutes=(prev.working_minutes||0)+(seg.working_minutes||0);
+            prev.partial_qty=(prev.partial_qty||0)+(seg.partial_qty||0);
+          } else {
+            collapsed.push({...seg});
+          }
+        }
+
+        // sum(std_min × qty) ÷ sum(working_min × num_emp) × 100
         if(stdMin){
-          // Combined: sum(std × qty) ÷ sum(working_min × num_emp) × 100
-          const totalStdWork=finalSegments.reduce((a,s)=>a+(stdMin*(s.partial_qty||0)),0);
-          const totalActualWork=finalSegments.reduce((a,s)=>a+((s.working_minutes||0)*(s.num_employees||1)),0);
+          const totalStdWork=collapsed.reduce((a,s)=>a+(stdMin*(s.partial_qty||0)),0);
+          const totalActualWork=collapsed.reduce((a,s)=>a+((s.working_minutes||0)*(s.num_employees||1)),0);
           eff=totalActualWork>0?Math.round((totalStdWork/totalActualWork)*100):null;
         }
+        finalSegments=[...collapsed];
       } else {
         // ── Simple efficiency (no swap) ──
         const numEmp=cm.num_employees||1;
@@ -986,24 +997,37 @@ function ProductionScheduler({user,onLogout}){
         const previewEff=(()=>{
           if(!hasQty||!stdMin) return null;
           if(cm.employee_segments&&cm.employee_segments.length>0){
-            const segs=cm.employee_segments;
+            const segs=[...cm.employee_segments];
             const completedSegs=segs.slice(0,-1);
             const completedWorkMins=completedSegs.reduce((a,s)=>a+(s.working_minutes||0),0);
             const completedQty=completedSegs.reduce((a,s)=>a+(s.partial_qty||0),0);
-            const lastQty=Math.max(0,endQty-completedQty);
             const totalMins=minsTo(cm.start_datetime,nowISO());
             const workMins=Math.max(totalMins-(cm.break_minutes||0),0.1);
             const lastWorkMins=Math.max(0,workMins-completedWorkMins);
             const lastNumEmp=segs[segs.length-1].num_employees||1;
-            const totalStdWork=completedSegs.reduce((a,s)=>a+(stdMin*(s.partial_qty||0)),0)+(stdMin*lastQty);
-            const totalActualWork=completedSegs.reduce((a,s)=>a+((s.working_minutes||0)*(s.num_employees||1)),0)+(lastWorkMins*lastNumEmp);
+            const lastQty=Math.max(0,endQty-completedQty);
+            const allSegs=[...completedSegs,{num_employees:lastNumEmp,partial_qty:lastQty,working_minutes:lastWorkMins}];
+            const collapsed=[];
+            for(const seg of allSegs){
+              const prev=collapsed[collapsed.length-1];
+              if(prev&&prev.num_employees===seg.num_employees){
+                prev.working_minutes=(prev.working_minutes||0)+(seg.working_minutes||0);
+                prev.partial_qty=(prev.partial_qty||0)+(seg.partial_qty||0);
+              } else { collapsed.push({...seg}); }
+            }
+            const totalStdWork=collapsed.reduce((a,s)=>a+(stdMin*(s.partial_qty||0)),0);
+            const totalActualWork=collapsed.reduce((a,s)=>a+((s.working_minutes||0)*(s.num_employees||1)),0);
             return totalActualWork>0?Math.round((totalStdWork/totalActualWork)*100):null;
           }
           const totalMins=minsTo(cm.start_datetime,nowISO());
           const workMins=Math.max(totalMins-(cm.break_minutes||0),0.1);
           return calcEff(stdMin,endQty,workMins,cm.num_employees||1);
+          }
+          const totalMins=minsTo(cm.start_datetime,nowISO());
+          const workMins=Math.max(totalMins-(cm.break_minutes||0),0.1);
+          return calcEff(stdMin,endQty,workMins,cm.num_employees||1);
         })();
-        const hasSwap=cm.employee_segments&&cm.employee_segments.length>0;
+
         return(
         <div className="mo" onClick={e=>e.target===e.currentTarget&&setCm(null)}>
           <div className="md au">
@@ -1017,25 +1041,17 @@ function ProductionScheduler({user,onLogout}){
               <div style={{fontSize:11,color:"#5A5F78",marginTop:2}}>Line: <span style={{color:"#7B8CFF"}}>{cm.line_id} — {cm.line_name}</span></div>
               <div style={{fontSize:11,color:"#5A5F78"}}>Employees: <span style={{color:"#C8CADC"}}>{cm.employees?.join(", ")||cm.employee}</span> <span style={{color:"#FF9500"}}>({cm.num_employees||1} 👥)</span></div>
               <div style={{fontSize:11,color:"#5A5F78"}}>Plan Qty: <span style={{color:"#C8CADC",fontWeight:700}}>{planQty}</span> | Breaks: <span style={{color:"#FF9500"}}>{(cm.breaks||[]).length} ({Math.round(cm.break_minutes||0)} min)</span></div>
-              {(()=>{const it=items.find(i=>i.id===cm.item_id); return it?.std_minutes?(
-                <div style={{fontSize:11,color:"#7B8CFF",marginTop:4}}>
-                  {hasSwap
-                    ?`⏱ Segmented calc: ${cm.employee_segments.length} segments (employee swap occurred)`
-                    :`⏱ Std ${it.std_minutes} min/piece × end_qty ÷ (working_mins × ${cm.num_employees||1} emp) × 100`}
-                  {hasSwap&&<span style={{color:"#FF9500",fontSize:10,marginLeft:6}}>↗ more accurate than simple formula</span>}
-                </div>
-              ):null;})()}
-              {hasSwap&&<div style={{background:"rgba(123,140,255,.08)",border:"1px solid rgba(123,140,255,.2)",borderRadius:5,padding:"6px 12px",fontSize:10,color:"#7B8CFF",marginTop:6}}>
-                👤 Employee swap recorded — efficiency calculated per segment:<br/>
-                {cm.employee_segments.slice(0,-1).map((s,i)=>(
-                  <span key={i} style={{display:"block",color:"#8B90A8",fontSize:9,marginTop:2}}>
-                    Seg {i+1}: {s.num_employees} emp · {s.partial_qty??0} pcs · {s.working_minutes??0} min working
-                  </span>
-                ))}
-                <span style={{display:"block",color:"#8B90A8",fontSize:9,marginTop:2}}>
-                  Final seg: {cm.employee_segments[cm.employee_segments.length-1]?.num_employees} emp · remaining pcs at close
-                </span>
-              </div>}
+              {(()=>{
+                const it=items.find(i=>i.id===cm.item_id);
+                const hasSwap=cm.employee_segments&&cm.employee_segments.length>0;
+                return it?.std_minutes?(
+                  <div style={{fontSize:11,color:"#7B8CFF",marginTop:4}}>
+                    {hasSwap
+                      ?<span>{"⏱ Segmented: "}{cm.employee_segments.length}{" segments — sum(std\u00d7qty) \u00f7 sum(work\u00d7emp) \u00d7 100"}</span>
+                      :`⏱ Std ${it.std_minutes} min/piece \u00d7 end_qty \u00f7 (working_mins \u00d7 ${cm.num_employees||1} emp) \u00d7 100`}
+                  </div>
+                ):null;
+              })()}
               {previewEff!=null&&hasQty&&<div style={{background:"#13161F",borderRadius:5,padding:"8px 12px",marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <span style={{fontSize:10,color:"#8B90A8"}}>Projected efficiency:</span>
                 <span style={{fontSize:15,fontWeight:700,color:effColor(previewEff)}}>{previewEff}%</span>
