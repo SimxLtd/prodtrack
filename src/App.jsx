@@ -164,6 +164,9 @@ const GStyles=()=>(
     input:focus,select:focus,textarea:focus{border-color:#00D4AA}
     input[readonly]{cursor:default;} input::placeholder{color:#4A4F65} select option{background:#1A1D27}
     label{display:block;font-size:11px;color:#8B90A8;margin-bottom:6px;letter-spacing:1px;text-transform:uppercase}
+    .f-empty{border-color:#00D4AA!important;}
+    .f-filled{border-color:#C8CADC!important;}
+    .f-error{border-color:#FF4B6E!important;background:rgba(255,75,110,.04)!important;}
     .fg{margin-bottom:16px}
     .card{background:#1A1D27;border:1px solid #2A2F45;border-radius:8px;padding:20px}
     .nb{background:none;border:none;font-family:'IBM Plex Mono',monospace;font-size:12px;padding:10px 14px;cursor:pointer;transition:all .15s;letter-spacing:.5px;white-space:nowrap}
@@ -210,11 +213,11 @@ function LoginScreen({onLogin}){
           <div style={{fontSize:11,color:"#5A5F78",letterSpacing:3,marginTop:4,fontFamily:"'IBM Plex Mono',monospace"}}>PRODUCTION SCHEDULER</div>
         </div>
         <div className="card">
-          <div className="fg"><label>Username</label><input placeholder="Enter username" value={u} onChange={e=>setU(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()} autoFocus/></div>
+          <div className="fg"><label>Username</label><input placeholder="Enter username" value={u} onChange={e=>setU(e.target.value)} className={u?"f-filled":"f-empty"} onKeyDown={e=>e.key==="Enter"&&go()} autoFocus/></div>
           <div className="fg">
             <label>Password</label>
             <div style={{position:"relative"}}>
-              <input type={show?"text":"password"} placeholder="Enter password" value={p} onChange={e=>setP(e.target.value)} onKeyDown={e=>e.key==="Enter"&&go()} style={{paddingRight:44}}/>
+              <input type={show?"text":"password"} placeholder="Enter password" value={p} onChange={e=>setP(e.target.value)} className={p?"f-filled":"f-empty"} onKeyDown={e=>e.key==="Enter"&&go()} style={{paddingRight:44}}/>
               <button onClick={()=>setShow(s=>!s)} style={{position:"absolute",right:12,top:"50%",transform:"translateY(-50%)",background:"none",border:"none",color:"#5A5F78",cursor:"pointer",fontSize:16}}>{show?"🙈":"👁"}</button>
             </div>
           </div>
@@ -670,19 +673,19 @@ function ProductionScheduler({user,onLogout}){
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
                   <div className="fg">
                     <label>Order Number *</label>
-                    <input placeholder="ORD-2025-001" value={nf.orderNumber} onChange={e=>setNf(f=>({...f,orderNumber:e.target.value.toUpperCase(),autoFilled:false}))} style={nf.autoFilled?{borderColor:"#00D4AA",color:"#00D4AA"}:{}}/>
+                    <input placeholder="ORD-2025-001" value={nf.orderNumber} className={nf.orderNumber?"f-filled":"f-empty"} onChange={e=>setNf(f=>({...f,orderNumber:e.target.value.toUpperCase(),autoFilled:false}))} style={nf.autoFilled?{borderColor:"#00D4AA",color:"#00D4AA"}:{}}/>
                     {nf.autoFilled&&<div className="readonly-note">✔ Auto-filled</div>}
                   </div>
                   <div className="fg">
                     <label>Production Qty *</label>
-                    <input type="number" min="1" placeholder="0" value={nf.productionQty} onChange={e=>setNf(f=>({...f,productionQty:e.target.value}))} style={nf.autoFilled?{borderColor:"#00D4AA",color:"#00D4AA"}:{}}/>
+                    <input type="number" min="1" placeholder="0" value={nf.productionQty} className={nf.productionQty?"f-filled":"f-empty"} onChange={e=>setNf(f=>({...f,productionQty:e.target.value}))} style={nf.autoFilled?{borderColor:"#00D4AA",color:"#00D4AA"}:{}}/>
                     {nf.autoFilled&&<div className="readonly-note">✔ Auto-filled</div>}
                   </div>
                 </div>
 
                 <div className="fg">
                   <label>Production Line *</label>
-                  <select value={nf.lineId} onChange={e=>setNf(f=>({...f,lineId:e.target.value}))} style={nf.autoFilled&&nf.lineId?{borderColor:"#00D4AA",color:"#00D4AA"}:{}}>
+                  <select value={nf.lineId} onChange={e=>setNf(f=>({...f,lineId:e.target.value}))} className={nf.lineId?"f-filled":"f-empty"}>
                     <option value="">— Select Line —</option>
                     {lines.map(l=><option key={l.id} value={l.id}>{l.id} — {l.name}</option>)}
                   </select>
@@ -709,7 +712,7 @@ function ProductionScheduler({user,onLogout}){
                 <div className="fg">
                   <label>Start Date & Time</label>
                   <div style={{display:"flex",gap:10}}>
-                    <input type="datetime-local" step="1" value={nf.startDateTime} onChange={e=>setNf(f=>({...f,startDateTime:e.target.value}))} style={{flex:1,...(nf.autoFilled&&nf.startDateTime?{borderColor:"#00D4AA",color:"#00D4AA"}:{})}}/>
+                    <input type="datetime-local" step="1" value={nf.startDateTime} onChange={e=>setNf(f=>({...f,startDateTime:e.target.value}))} className={nf.startDateTime?"f-filled":"f-empty"} style={{flex:1}}/>
                     <button className="bg" style={{whiteSpace:"nowrap",padding:"10px 14px"}} onClick={()=>{const l=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,19);setNf(f=>({...f,startDateTime:l}));}}>📍 Now</button>
                   </div>
                   {nf.autoFilled&&nf.startDateTime&&<div className="readonly-note">✔ Auto-filled — click 📍 Now to use current time</div>}
@@ -1062,7 +1065,8 @@ function ProductionScheduler({user,onLogout}){
                 value={cf.endQty}
                 onChange={e=>setCf(f=>({...f,endQty:e.target.value}))}
                 autoFocus
-                style={!hasQty&&cf.endQty!==""?{borderColor:"#FF4B6E"}:isShort?{borderColor:"#FF9500"}:isOver?{borderColor:"#FF4B6E"}:hasQty?{borderColor:"#00D4AA"}:{}}
+                className={(!hasQty&&cf.endQty!=="")||isOver?"f-error":hasQty&&!isShort?"f-filled":isShort?"":"f-empty"}
+                style={isShort?{borderColor:"#FF9500"}:{}}
               />
               {!hasQty&&cf.endQty!==""&&<div style={{fontSize:10,color:"#FF4B6E",marginTop:4,display:"flex",alignItems:"center",gap:5}}>⚠ End quantity must be greater than 0</div>}
               {isShort&&<div style={{fontSize:10,color:"#FF9500",marginTop:4,display:"flex",alignItems:"center",gap:5}}>⚠ End qty ({endQty}) is less than plan qty ({planQty}) — reason required below</div>}
@@ -1080,7 +1084,7 @@ function ProductionScheduler({user,onLogout}){
                 placeholder={isShort?"Explain why end qty is below plan (e.g. material shortage, machine issue)…":"Notes, issues, observations…"}
                 value={cf.remarks}
                 onChange={e=>setCf(f=>({...f,remarks:e.target.value}))}
-                style={needsReason?{borderColor:"#FF4B6E"}:isShort&&cf.remarks.trim()?{borderColor:"#00D4AA"}:{}}
+                className={needsReason?"f-error":cf.remarks.trim()?"f-filled":isShort?"f-empty":""}
               />
               {needsReason&&<div style={{fontSize:10,color:"#FF4B6E",marginTop:4,display:"flex",alignItems:"center",gap:5}}>⚠ Please explain why end qty is below plan</div>}
               {isShort&&cf.remarks.trim()&&<div style={{fontSize:10,color:"#00D4AA",marginTop:4,display:"flex",alignItems:"center",gap:5}}>✔ Reason provided</div>}
@@ -1537,12 +1541,12 @@ function SwapEmployeeModal({order:o,employees,user,onSaved,onClose,showToast}){
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
           <div>
             <label style={S.lbl}>Partial Qty So Far <span style={{color:"#5A5F78",fontSize:8}}>(optional)</span></label>
-            <input type="number" min="0" style={S.inp} placeholder="e.g. 75" value={partialQty} onChange={e=>setPartialQty(e.target.value)}/>
+            <input type="number" min="0" className={partialQty?"f-filled":"f-empty"} style={S.inp} placeholder="e.g. 75" value={partialQty} onChange={e=>setPartialQty(e.target.value)}/>
             <div style={{fontSize:9,color:"#5A5F78",marginTop:3}}>Pieces done before handover — logged in audit</div>
           </div>
           <div>
             <label style={S.lbl}>Reason <span style={{color:"#FF4B6E"}}>*</span></label>
-            <input style={S.inp} placeholder="e.g. Shift change, unwell…" value={reason} onChange={e=>setReason(e.target.value)}/>
+            <input className={reason.trim()?"f-filled":"f-empty"} style={S.inp} placeholder="e.g. Shift change, unwell…" value={reason} onChange={e=>setReason(e.target.value)}/>
           </div>
         </div>
 
@@ -1666,7 +1670,7 @@ function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
           <div>
             <label style={S.lbl}>Order Number</label>
             <input value={orderNum} onChange={e=>setOrderNum(e.target.value.toUpperCase())}
-              style={{...S.inp,borderColor:"#FF9500",background:"rgba(255,149,0,.04)"}}/>
+              className={orderNum?"f-filled":"f-error"} style={{...S.inp}}/>
             <div style={S.hint}>⚠ Updates order number permanently</div>
           </div>
           <div>
@@ -1675,7 +1679,7 @@ function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
               value={endQtyEdit}
               onChange={e=>setEndQtyEdit(e.target.value)}
               disabled={o.status!=="Completed"}
-              style={{...S.inp,borderColor:"#FF9500",background:"rgba(255,149,0,.04)",...(o.status!=="Completed"?{opacity:.4}:{})}}/>
+              className={endQtyEdit?"f-filled":"f-empty"} style={{...S.inp,...(o.status!=="Completed"?{opacity:.4}:{})}}/>
             <div style={S.hint}>Plan qty: {o.production_qty||"—"} · recalculates efficiency</div>
           </div>
         </div>
@@ -1687,12 +1691,12 @@ function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
         <div style={S.row2}>
           <div>
             <label style={S.lbl}>Start Date & Time</label>
-            <input type="datetime-local" step="1" value={startDT} onChange={e=>setStartDT(e.target.value)} style={S.inp}/>
+            <input type="datetime-local" step="1" value={startDT} onChange={e=>setStartDT(e.target.value)} className={startDT?"f-filled":"f-empty"} style={S.inp}/>
           </div>
           <div>
             <label style={S.lbl}>End Date & Time {o.status!=="Completed"&&<span style={{color:"#5A5F78",fontSize:8}}>(completed only)</span>}</label>
             <input type="datetime-local" step="1" value={endDT} onChange={e=>setEndDT(e.target.value)}
-              disabled={o.status!=="Completed"}
+              className={endDT?"f-filled":"f-empty"} disabled={o.status!=="Completed"}
               style={{...S.inp,...(o.status!=="Completed"?{opacity:.4}:{})}}/>
           </div>
         </div>
@@ -1733,7 +1737,7 @@ function EditTimesModal({order:o,item,user,onSaved,onClose,showToast}){
         {/* Reason */}
         <div style={{marginBottom:10}}>
           <label style={S.lbl}>Reason for edit <span style={{color:"#FF4B6E"}}>*required</span></label>
-          <input style={S.inp} placeholder="e.g. Wrong end qty entered at close, corrected to 95" value={reason} onChange={e=>setReason(e.target.value)}/>
+          <input className={reason.trim()?"f-filled":"f-empty"} style={S.inp} placeholder="e.g. Wrong end qty entered at close, corrected to 95" value={reason} onChange={e=>setReason(e.target.value)}/>
         </div>
 
         {/* Buttons */}
