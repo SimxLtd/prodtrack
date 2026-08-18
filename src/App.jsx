@@ -759,6 +759,11 @@ function ProductionScheduler({user,onLogout}){
 
               {/* ── Employee Efficiency ── */}
               <EmployeeEfficiency orders={orders} employees={employees}/>
+
+              <div style={{height:1,background:"#2A2F45",margin:"22px 0"}}/>
+
+              {/* ── Workforce Optimiser ── */}
+              <WorkforceOptimiser orders={orders} items={items}/>
             </div>
           )}
 
@@ -2544,8 +2549,200 @@ function MonthlyTracker({orders,items}){
 }
 
 // ══════════════════════════════════════════════════════════════
-//  EMPLOYEE EFFICIENCY
+//  WORKFORCE OPTIMISER
 // ══════════════════════════════════════════════════════════════
+function WorkforceOptimiser({orders,items}){
+  const [query,setQuery]=useState("");
+  const [selectedItem,setSelectedItem]=useState(null);
+  const [open,setOpen]=useState(false);
+  const [results,setResults]=useState(null);
+  const ref=useRef();
+
+  useEffect(()=>{
+    const h=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false);};
+    document.addEventListener("mousedown",h);
+    return()=>document.removeEventListener("mousedown",h);
+  },[]);
+
+  const filteredItems=query.trim()
+    ?items.filter(i=>i.id?.toUpperCase().includes(query.toUpperCase())||i.name?.toUpperCase().includes(query.toUpperCase())).slice(0,80)
+    :items.slice(0,80);
+
+  const analyse=()=>{
+    if(!selectedItem)return;
+    const completed=orders.filter(o=>o.status==="Completed"&&o.item_id===selectedItem.id&&o.efficiency!=null&&o.working_minutes>0&&o.end_qty>0);
+    if(!completed.length){setResults({none:true});return;}
+
+    // Group by num_employees
+    const groups={};
+    completed.forEach(o=>{
+      const n=o.num_employees||1;
+      if(!groups[n])groups[n]={orders:[],effSum:0,mppSum:0,manHrsSum:0,count:0};
+      const mpp=(o.working_minutes*(o.num_employees||1))/(o.end_qty);
+      const manHrs=(o.working_minutes*(o.num_employees||1))/60;
+      groups[n].orders.push(o);
+      groups[n].effSum+=o.efficiency;
+      groups[n].mppSum+=mpp;
+      groups[n].manHrsSum+=manHrs;
+      groups[n].count++;
+    });
+
+    // Calculate averages
+    const grouped=Object.entries(groups).map(([n,g])=>({
+      numEmp:Number(n),
+      count:g.count,
+      avgEff:Math.round(g.effSum/g.count),
+      avgMpp:Math.round((g.mppSum/g.count)*100)/100,
+      avgManHrs:Math.round((g.manHrsSum/g.count)*100)/100,
+    }));
+
+    // Normalise each metric 0-100 within group
+    const effs=grouped.map(g=>g.avgEff);
+    const mpps=grouped.map(g=>g.avgMpp);
+    const hrs=grouped.map(g=>g.avgManHrs);
+    const minEff=Math.min(...effs),maxEff=Math.max(...effs);
+    const minMpp=Math.min(...mpps),maxMpp=Math.max(...mpps);
+    const minHrs=Math.min(...hrs),maxHrs=Math.max(...hrs);
+
+    const norm=(v,min,max,higherBetter)=>{
+      if(max===min)return 100;
+      const n=(v-min)/(max-min)*100;
+      return higherBetter?n:100-n;
+    };
+
+    const scored=grouped.map(g=>({
+      ...g,
+      score:Math.round(
+        norm(g.avgEff,minEff,maxEff,true)*0.4+
+        norm(g.avgMpp,minMpp,maxMpp,false)*0.4+
+        norm(g.avgManHrs,minHrs,maxHrs,false)*0.2
+      ),
+    })).sort((a,b)=>b.score-a.score);
+
+    setResults({scored,totalOrders:completed.length});
+  };
+
+  const empColor=(n)=>n===1?"#7B8CFF":n===2?"#00D4AA":n===3?"#FF9500":n===4?"#FF4B6E":"#C8CADC";
+  const empBg=(n)=>n===1?"rgba(123,140,255,.1)":n===2?"rgba(0,212,170,.1)":n===3?"rgba(255,149,0,.1)":n===4?"rgba(255,75,110,.1)":"rgba(200,202,220,.1)";
+
+  return(
+    <div>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}>
+        <div>
+          <div style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>Workforce Optimiser</div>
+          <div style={{fontSize:10,color:"#5A5F78",marginTop:3}}>Find the optimal team size for any product based on historical performance</div>
+        </div>
+        <span style={{background:"rgba(0,212,170,.12)",color:"#00D4AA",fontSize:9,padding:"2px 7px",borderRadius:8,border:"1px solid rgba(0,212,170,.2)",fontWeight:700}}>NEW</span>
+      </div>
+
+      {/* Item search */}
+      <div style={{display:"flex",gap:8,marginBottom:6}} ref={ref}>
+        <div style={{flex:1,position:"relative"}}>
+          <input
+            className={selectedItem?"f-filled":"f-empty"}
+            placeholder="Search item by ID or name…"
+            value={selectedItem?`${selectedItem.id} — ${selectedItem.name}`:query}
+            onChange={e=>{setQuery(e.target.value);setSelectedItem(null);setResults(null);setOpen(true);}}
+            onFocus={()=>setOpen(true)}
+            style={{width:"100%",fontSize:12,padding:"9px 12px"}}
+          />
+          {open&&query.trim()&&!selectedItem&&(
+            <div style={{position:"absolute",zIndex:100,top:"100%",left:0,right:0,marginTop:3,background:"#1A1D27",border:"1px solid #2A2F45",borderRadius:5,boxShadow:"0 6px 24px rgba(0,0,0,.5)",maxHeight:200,overflowY:"auto"}}>
+              {filteredItems.length===0
+                ?<div style={{padding:"10px 12px",color:"#4A4F65",fontSize:11}}>No items found</div>
+                :filteredItems.map(i=>(
+                  <div key={i.id} onClick={()=>{setSelectedItem(i);setQuery("");setOpen(false);setResults(null);}}
+                    style={{padding:"8px 12px",cursor:"pointer",fontSize:11,borderBottom:"1px solid #1E2135",display:"flex",gap:10,alignItems:"center"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,.04)"}
+                    onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                    <span style={{color:"#5A5F78",fontSize:10,minWidth:70}}>{i.id}</span>
+                    <span style={{color:"#C8CADC"}}>{i.name}</span>
+                    {i.std_minutes&&<span style={{color:"#7B8CFF",fontSize:9,marginLeft:"auto"}}>{i.std_minutes}min</span>}
+                  </div>
+                ))
+              }
+            </div>
+          )}
+        </div>
+        {selectedItem&&<button onClick={()=>{setSelectedItem(null);setQuery("");setResults(null);}}
+          style={{background:"none",border:"1px solid #2A2F45",color:"#5A5F78",padding:"0 10px",borderRadius:4,cursor:"pointer",fontSize:13}}
+          onMouseEnter={e=>e.currentTarget.style.color="#FF4B6E"}
+          onMouseLeave={e=>e.currentTarget.style.color="#5A5F78"}>✕</button>}
+        <button onClick={analyse} disabled={!selectedItem}
+          style={{background:selectedItem?"#00D4AA":"#2A2F45",color:selectedItem?"#0F1117":"#5A5F78",border:"none",padding:"9px 18px",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,fontSize:12,borderRadius:4,cursor:selectedItem?"pointer":"not-allowed",whiteSpace:"nowrap"}}>
+          ⚡ Analyse
+        </button>
+      </div>
+      <div style={{fontSize:9,color:"#5A5F78",marginBottom:16}}>Based on all completed orders for this item across all time</div>
+
+      {/* Results */}
+      {results&&results.none&&(
+        <div style={{background:"#13161F",border:"1px solid #2A2F45",borderRadius:6,padding:"20px",textAlign:"center",color:"#4A4F65",fontSize:11}}>
+          No completed orders found for {selectedItem?.id} — {selectedItem?.name}
+        </div>
+      )}
+
+      {results&&results.scored&&(()=>{
+        const {scored,totalOrders}=results;
+        const best=scored[0];
+        return(
+          <div>
+            <div style={{fontSize:10,color:"#5A5F78",marginBottom:12}}>
+              {totalOrders} completed order{totalOrders!==1?"s":""} analysed for <span style={{color:"#00D4AA"}}>{selectedItem.id}</span>
+            </div>
+
+            {scored.map((g,idx)=>{
+              const isBest=idx===0;
+              return(
+                <div key={g.numEmp} style={{
+                  position:"relative",background:isBest?"rgba(0,212,170,.05)":"#13161F",
+                  border:`${isBest?"2px":"1px"} solid ${isBest?"rgba(0,212,170,.4)":"#2A2F45"}`,
+                  borderRadius:8,padding:"14px 16px",marginBottom:10
+                }}>
+                  {isBest&&<div style={{position:"absolute",top:-10,right:12,background:"#00D4AA",color:"#0F1117",fontSize:9,fontWeight:700,padding:"2px 10px",borderRadius:10}}>★ RECOMMENDED</div>}
+                  <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:12}}>
+                    <div style={{width:38,height:38,borderRadius:"50%",border:`2px solid ${empColor(g.numEmp)}`,background:empBg(g.numEmp),display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,fontWeight:700,color:empColor(g.numEmp),flexShrink:0}}>{g.numEmp}</div>
+                    <div>
+                      <div style={{fontSize:13,fontWeight:700,color:isBest?"#00D4AA":empColor(g.numEmp)}}>
+                        {g.numEmp} Employee{g.numEmp!==1?"s":""}{isBest?" — Best Overall":""}
+                      </div>
+                      <div style={{fontSize:10,color:"#5A5F78"}}>{g.count} completed order{g.count!==1?"s":""}</div>
+                    </div>
+                    <div style={{marginLeft:"auto",textAlign:"right"}}>
+                      <div style={{fontSize:18,fontWeight:700,color:isBest?"#00D4AA":empColor(g.numEmp)}}>{g.score}</div>
+                      <div style={{fontSize:8,color:"#5A5F78",letterSpacing:1}}>SCORE / 100</div>
+                    </div>
+                  </div>
+                  <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8}}>
+                    {[
+                      {lbl:"Avg Efficiency",val:`${g.avgEff}%`,better:g.avgEff===Math.max(...scored.map(x=>x.avgEff))},
+                      {lbl:"Avg Min/Piece",val:g.avgMpp.toFixed(2),better:g.avgMpp===Math.min(...scored.map(x=>x.avgMpp))},
+                      {lbl:"Avg Man Hrs",val:g.avgManHrs.toFixed(2),better:g.avgManHrs===Math.min(...scored.map(x=>x.avgManHrs))},
+                    ].map(({lbl,val,better})=>(
+                      <div key={lbl} style={{background:"#1A1D27",borderRadius:5,padding:"8px 10px",textAlign:"center",border:better?"1px solid rgba(0,212,170,.2)":"1px solid transparent"}}>
+                        <div style={{fontSize:15,fontWeight:700,color:better?"#00D4AA":"#C8CADC",marginBottom:2}}>{val}</div>
+                        <div style={{fontSize:8,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase"}}>{lbl}</div>
+                        {better&&<div style={{fontSize:8,color:"#00D4AA",marginTop:2}}>★ best</div>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* Score explanation */}
+            <div style={{background:"#13161F",border:"1px solid #2A2F45",borderRadius:6,padding:"10px 14px",fontSize:9,color:"#8B90A8",lineHeight:1.8,marginTop:4}}>
+              <span style={{color:"#FF9500",fontWeight:700}}>How the score is calculated:</span><br/>
+              Efficiency % (40%) + Min/Piece (40%) + Man Hrs (20%) — each normalised 0–100 within the group then weighted and summed · ★ = best in that metric
+            </div>
+          </div>
+        );
+      })()}
+    </div>
+  );
+}
+
+
 function EmployeeEfficiency({orders,employees}){
   const nowNZ = new Date();
   const curNZDate  = nowNZ.toLocaleDateString("en-CA",{timeZone:NZ_TZ});
