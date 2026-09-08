@@ -757,13 +757,13 @@ function ProductionScheduler({user,onLogout}){
               {/* ── Divider ── */}
               <div style={{height:1,background:"#2A2F45",margin:"22px 0"}}/>
 
-              {/* ── Employee Efficiency ── */}
-              <EmployeeEfficiency orders={orders} employees={employees}/>
+              {/* ── Workforce Optimiser ── */}
+              <WorkforceOptimiser orders={orders} items={items}/>
 
               <div style={{height:1,background:"#2A2F45",margin:"22px 0"}}/>
 
-              {/* ── Workforce Optimiser ── */}
-              <WorkforceOptimiser orders={orders} items={items}/>
+              {/* ── Employee Efficiency ── */}
+              <EmployeeEfficiency orders={orders} employees={employees}/>
             </div>
           )}
 
@@ -2749,7 +2749,7 @@ function EmployeeEfficiency({orders,employees}){
   const curNZYear  = Number(curNZDate.slice(0,4));
   const curNZMonth = Number(curNZDate.slice(5,7))-1;
 
-  const [selEmp,setSelEmp]     = useState(employees[0]||"");
+  const [selEmp,setSelEmp]     = useState("");
   const [selYear,setSelYear]   = useState(curNZYear);
   const [selMonth,setSelMonth] = useState(curNZMonth);
 
@@ -2810,19 +2810,23 @@ function EmployeeEfficiency({orders,employees}){
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14,flexWrap:"wrap",gap:10}}>
         <div>
           <div style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>
-            Employee Efficiency <span style={{background:"rgba(0,212,170,.12)",color:"#00D4AA",fontSize:9,padding:"2px 7px",borderRadius:8,border:"1px solid rgba(0,212,170,.2)",fontWeight:700,marginLeft:6}}>NEW</span>
+            Employee Efficiency
+            {selEmp&&<span style={{color:"#00D4AA",fontSize:13,letterSpacing:0,textTransform:"none",marginLeft:8,fontWeight:700}}>— {selEmp}</span>}
           </div>
-          <div style={{fontSize:10,color:"#5A5F78",marginTop:2}}>Average efficiency per employee for the selected month</div>
+          <div style={{fontSize:10,color:"#5A5F78",marginTop:2}}>
+            {selEmp?"Average efficiency per employee for the selected month":"Select an employee to view their efficiency breakdown"}
+          </div>
         </div>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
           {/* Employee select */}
           <select value={selEmp} onChange={e=>setSelEmp(e.target.value)}
-            style={{background:"#13161F",border:`1px solid ${selEmp?"#00D4AA":"#2A2F45"}`,color:selEmp?"#00D4AA":"#E8EAF0",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,padding:"7px 12px",borderRadius:5,minWidth:160}}>
-            {employees.length===0&&<option value="">No employees</option>}
+            className={selEmp?"f-filled":"f-empty"}
+            style={{background:"#13161F",fontFamily:"'IBM Plex Mono',monospace",fontSize:12,padding:"7px 12px",borderRadius:5,minWidth:160,color:selEmp?"#00D4AA":"#E8EAF0"}}>
+            <option value="">— Select Employee —</option>
             {employees.map(e=><option key={e} value={e}>{e}</option>)}
           </select>
-          {/* Month nav */}
-          <div style={{display:"flex",alignItems:"center",background:"#1A1D27",border:"1px solid #2A2F45",borderRadius:6,overflow:"hidden"}}>
+          {/* Month nav — only show when employee selected */}
+          {selEmp&&<div style={{display:"flex",alignItems:"center",background:"#1A1D27",border:"1px solid #2A2F45",borderRadius:6,overflow:"hidden"}}>
             <button onClick={prevMonth} style={{background:"none",border:"none",color:"#8B90A8",fontSize:15,padding:"6px 11px",cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace"}}
               onMouseEnter={e=>{e.currentTarget.style.color="#00D4AA";e.currentTarget.style.background="rgba(0,212,170,.07)";}}
               onMouseLeave={e=>{e.currentTarget.style.color="#8B90A8";e.currentTarget.style.background="none";}}>‹</button>
@@ -2831,18 +2835,21 @@ function EmployeeEfficiency({orders,employees}){
               style={{background:"none",border:"none",color:isCurrentMonth?"#3A3F55":"#8B90A8",fontSize:15,padding:"6px 11px",cursor:isCurrentMonth?"not-allowed":"pointer",fontFamily:"'IBM Plex Mono',monospace"}}
               onMouseEnter={e=>{if(!isCurrentMonth){e.currentTarget.style.color="#00D4AA";e.currentTarget.style.background="rgba(0,212,170,.07)";}}}
               onMouseLeave={e=>{e.currentTarget.style.color=isCurrentMonth?"#3A3F55":"#8B90A8";e.currentTarget.style.background="none";}}>›</button>
-          </div>
-          {!isCurrentMonth&&(
+          </div>}
+          {selEmp&&!isCurrentMonth&&(
             <button onClick={goCurrentMonth} style={{background:"rgba(0,212,170,.1)",border:"1px solid rgba(0,212,170,.25)",color:"#00D4AA",fontSize:10,padding:"6px 12px",borderRadius:4,cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace",fontWeight:700,whiteSpace:"nowrap"}}>
               Current Month
             </button>
           )}
-          {monthLoading&&<span style={{fontSize:10,color:"#7B8CFF",fontWeight:700,background:"rgba(123,140,255,.1)",border:"1px solid rgba(123,140,255,.2)",padding:"4px 10px",borderRadius:8}}>⟳ Loading…</span>}
+          {selEmp&&monthLoading&&<span style={{fontSize:10,color:"#7B8CFF",fontWeight:700,background:"rgba(123,140,255,.1)",border:"1px solid rgba(123,140,255,.2)",padding:"4px 10px",borderRadius:8}}>⟳ Loading…</span>}
         </div>
       </div>
 
       {!selEmp ? (
-        <div className="card" style={{textAlign:"center",padding:32,color:"#4A4F65"}}>Select an employee to view their efficiency.</div>
+        <div style={{background:"#13161F",border:"1px solid #2A2F45",borderRadius:6,padding:"24px",textAlign:"center",color:"#4A4F65",fontSize:11}}>
+          <div style={{fontSize:24,marginBottom:8}}>👤</div>
+          Select an employee from the dropdown above to view their efficiency breakdown
+        </div>
       ) : (
         <div className="card">
           {/* KPI cards */}
