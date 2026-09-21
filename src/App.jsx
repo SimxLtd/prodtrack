@@ -612,7 +612,7 @@ function ProductionScheduler({user,onLogout}){
         ):(
           <>
           {/* ═══ DASHBOARD ═══ */}
-          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} onEditTimes={openEditTimes} onSwap={openSwap} reload={loadAll} activeSearch={activeSearch} setActiveSearch={setActiveSearch} yearStats={yearStats}/>}
+          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} onEditTimes={openEditTimes} onSwap={openSwap} reload={loadAll} activeSearch={activeSearch} setActiveSearch={setActiveSearch} yearStats={yearStats} deviceLineId={deviceLineId} deviceLineName={localStorage.getItem("prodtrack_device_line_name")||""}/>}
 
           {/* ═══ NEW ORDER ═══ */}
           {view==="new"&&(
@@ -1155,7 +1155,7 @@ function ProductionScheduler({user,onLogout}){
 // ══════════════════════════════════════════════════════════════
 //  DASHBOARD
 // ══════════════════════════════════════════════════════════════
-function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,onEditTimes,onSwap,reload,activeSearch,setActiveSearch,yearStats}){
+function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,onEditTimes,onSwap,reload,activeSearch,setActiveSearch,yearStats,deviceLineId="",deviceLineName=""}){
   const td=new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});
   const toLocalDate=dt=>{if(!dt)return"";return new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});};
   const curMonth=td.slice(0,7); // YYYY-MM
@@ -1246,10 +1246,10 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
         <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>
           Active Orders ({activeOrders.length})
-          {deviceLineId&&!isAdmin&&<span style={{background:"rgba(0,212,170,.1)",color:"#00D4AA",border:"1px solid rgba(0,212,170,.2)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>{localStorage.getItem("prodtrack_device_line_name")||deviceLineId}</span>}
+          {deviceLineId&&!isAdmin&&<span style={{background:"rgba(0,212,170,.1)",color:"#00D4AA",border:"1px solid rgba(0,212,170,.2)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>{deviceLineName||deviceLineId}</span>}
           {isAdmin&&deviceLineId&&<span style={{background:"rgba(255,149,0,.1)",color:"#FF9500",border:"1px solid rgba(255,149,0,.2)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>Admin — All Lines</span>}
         </h2>
-        {deviceLineId&&!isAdmin&&<div style={{fontSize:9,color:"#5A5F78",marginBottom:6}}>Showing {localStorage.getItem("prodtrack_device_line_name")||deviceLineId} only · Admin sees all lines</div>}
+        {deviceLineId&&!isAdmin&&<div style={{fontSize:9,color:"#5A5F78",marginBottom:6}}>Showing {deviceLineName||deviceLineId} only · Admin sees all lines</div>}
         <div style={{display:"flex",gap:8}}>
           <button className="bg" style={{fontSize:11}} onClick={reload}>↻ Refresh</button>
           <button className="bp" onClick={onNewOrder}>+ New Order</button>
