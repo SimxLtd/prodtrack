@@ -548,7 +548,8 @@ function ProductionScheduler({user,onLogout}){
   // Helper: is this order assigned to the current user?
   const isMine=o=>(o.employees||[o.employee]).includes(user.full_name);
   // Active orders — status is "In Progress" for both running and paused orders
-  const activeOrders=orders.filter(o=>o.status==="In Progress");
+  const deviceLineId=localStorage.getItem("prodtrack_device_line")||"";
+  const activeOrders=orders.filter(o=>o.status==="In Progress"&&(!deviceLineId||isAdmin||o.line_id===deviceLineId));
   // Worker sees all active orders same as admin
   const myActiveOrders=activeOrders;
   // Today's orders by local start date
@@ -1243,7 +1244,12 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
 
       {/* Active Orders + Search */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
-        <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>Active Orders ({activeOrders.length})</h2>
+        <h2 style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>
+          Active Orders ({activeOrders.length})
+          {deviceLineId&&!isAdmin&&<span style={{background:"rgba(0,212,170,.1)",color:"#00D4AA",border:"1px solid rgba(0,212,170,.2)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>{localStorage.getItem("prodtrack_device_line_name")||deviceLineId}</span>}
+          {isAdmin&&deviceLineId&&<span style={{background:"rgba(255,149,0,.1)",color:"#FF9500",border:"1px solid rgba(255,149,0,.2)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>Admin — All Lines</span>}
+        </h2>
+        {deviceLineId&&!isAdmin&&<div style={{fontSize:9,color:"#5A5F78",marginBottom:6}}>Showing {localStorage.getItem("prodtrack_device_line_name")||deviceLineId} only · Admin sees all lines</div>}
         <div style={{display:"flex",gap:8}}>
           <button className="bg" style={{fontSize:11}} onClick={reload}>↻ Refresh</button>
           <button className="bp" onClick={onNewOrder}>+ New Order</button>
@@ -1855,6 +1861,17 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
   // planned orders
   const [planned,setPlanned]=useState([]); const [loadingP,setLoadingP]=useState(true);
   const [planPreview,setPlanPreview]=useState(null); const [planSkipped,setPlanSkipped]=useState(0); const [planErrors,setPlanErrors]=useState([]); const [planView,setPlanView]=useState("today");
+  // device settings
+  const [deviceLineId,setDeviceLineId]=useState(()=>localStorage.getItem("prodtrack_device_line")||"");
+  const [deviceLineName,setDeviceLineName]=useState(()=>localStorage.getItem("prodtrack_device_line_name")||"");
+  const saveDeviceLine=()=>{
+    localStorage.setItem("prodtrack_device_line",deviceLineId);
+    const ln=lines.find(l=>l.id===deviceLineId);
+    const name=ln?ln.name:"";
+    localStorage.setItem("prodtrack_device_line_name",name);
+    setDeviceLineName(name);
+    showToast(deviceLineId?`Device set to ${name||deviceLineId}`:"Device line cleared — showing all orders.");
+  };
 
   useEffect(()=>{
     db.getUsers().then(u=>{setUsers(u);setLoadingU(false);}).catch(()=>setLoadingU(false));
@@ -1972,6 +1989,7 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
     {id:"items",label:`📦 Items (${items.length})`},
     {id:"employees",label:`👤 Employees (${employees.length})`},
     {id:"lines",label:`🏭 Lines (${lines.length})`},
+    {id:"device",label:`📱 Device${deviceLineId?" ("+deviceLineId+")":""}`},
   ];
 
   return(
@@ -2190,6 +2208,51 @@ function AdminPanel({items,setItems,employees,setEmployees,lines,setLines,showTo
                 </div>
               ))}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── DEVICE SETTINGS ── */}
+      {tab==="device"&&(
+        <div>
+          <div style={{background:"rgba(123,140,255,.07)",border:"1px solid rgba(123,140,255,.2)",borderRadius:6,padding:"10px 14px",marginBottom:18,fontSize:11,color:"#7B8CFF",lineHeight:1.6}}>
+            ℹ Set this device's production line so workers only see orders from that line on the Dashboard. Admin always sees all orders regardless of this setting.
+          </div>
+          <div className="card">
+            <div style={{fontSize:11,color:"#FF9500",letterSpacing:1,textTransform:"uppercase",fontWeight:700,marginBottom:16}}>📱 Device Production Line</div>
+
+            <div className="fg">
+              <label>This Device's Production Line</label>
+              <select value={deviceLineId} onChange={e=>setDeviceLineId(e.target.value)}
+                className={deviceLineId?"f-filled":"f-empty"}>
+                <option value="">— No filter (show all orders) —</option>
+                {lines.map(l=><option key={l.id} value={l.id}>{l.id} — {l.name}</option>)}
+              </select>
+              <div style={{fontSize:10,color:"#5A5F78",marginTop:5}}>
+                Workers on this device will only see active orders from the selected line · Leave blank to show all orders
+              </div>
+            </div>
+
+            <button className="bp" onClick={saveDeviceLine} style={{padding:"10px 20px",fontSize:12}}>
+              💾 Save to this Device
+            </button>
+
+            {deviceLineId&&(
+              <div style={{marginTop:16,background:"#13161F",border:"1px solid rgba(0,212,170,.2)",borderRadius:6,padding:"12px 14px",fontSize:11,color:"#8B90A8",lineHeight:1.8}}>
+                <div style={{color:"#00D4AA",fontWeight:700,marginBottom:6}}>✔ Current Device Setting</div>
+                <div>Line: <span style={{color:"#E8EAF0",fontWeight:700}}>{deviceLineId} — {deviceLineName}</span></div>
+                <div style={{fontSize:10,marginTop:4}}>Workers logging in on this device will only see orders from this line on their Dashboard.</div>
+                <button onClick={()=>{setDeviceLineId("");localStorage.removeItem("prodtrack_device_line");localStorage.removeItem("prodtrack_device_line_name");setDeviceLineName("");showToast("Device line cleared — showing all orders.");}}
+                  style={{marginTop:10,background:"none",border:"1px solid rgba(255,75,110,.3)",color:"#FF4B6E",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,padding:"5px 12px",borderRadius:4,cursor:"pointer"}}>
+                  ✕ Clear — Show All Orders
+                </button>
+              </div>
+            )}
+            {!deviceLineId&&(
+              <div style={{marginTop:16,background:"#13161F",border:"1px solid #2A2F45",borderRadius:6,padding:"12px 14px",fontSize:10,color:"#5A5F78"}}>
+                No line set — all workers on this device see all active orders (current behaviour).
+              </div>
+            )}
           </div>
         </div>
       )}
