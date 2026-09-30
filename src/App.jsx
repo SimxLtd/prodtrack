@@ -1213,10 +1213,25 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
       </div>
 
       {/* Man Hours by Line */}
-      {mhArr.length>0&&(
+      {mhArr.length>0&&(()=>{
+        const [mhOpen,setMhOpen]=useState(()=>localStorage.getItem("prodtrack_mh_open")!=="0");
+        const toggleMh=()=>setMhOpen(p=>{const n=!p;localStorage.setItem("prodtrack_mh_open",n?"1":"0");return n;});
+        return(
         <div className="card" style={{marginBottom:18}}>
-          <div style={{fontSize:11,color:"#FF9500",letterSpacing:2,textTransform:"uppercase",marginBottom:12}}>👥 Man Hours by Line (Today — Working Time Only)</div>
-          <div style={{display:"grid",gap:8}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:mhOpen?12:0}}>
+            <div style={{display:"flex",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+              <div style={{fontSize:11,color:"#FF9500",letterSpacing:2,textTransform:"uppercase"}}>👥 Man Hours by Line (Today)</div>
+              {!mhOpen&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {mhArr.map(l=><span key={l.id} style={{background:"rgba(255,149,0,.1)",color:"#FF9500",border:"1px solid rgba(255,149,0,.2)",fontSize:10,padding:"2px 9px",borderRadius:10,fontWeight:700}}>{l.id} · {(l.mins/60).toFixed(2)}h</span>)}
+              </div>}
+            </div>
+            <button onClick={toggleMh} style={{background:"none",border:"1px solid #2A2F45",color:"#8B90A8",fontFamily:"'IBM Plex Mono',monospace",fontSize:10,padding:"4px 10px",borderRadius:4,cursor:"pointer",whiteSpace:"nowrap",display:"flex",alignItems:"center",gap:5}}
+              onMouseEnter={e=>{e.currentTarget.style.borderColor="#FF9500";e.currentTarget.style.color="#FF9500";}}
+              onMouseLeave={e=>{e.currentTarget.style.borderColor="#2A2F45";e.currentTarget.style.color="#8B90A8";}}>
+              {mhOpen?"▲ Hide":"▼ Show"}
+            </button>
+          </div>
+          {mhOpen&&<div style={{display:"grid",gap:8}}>
             {mhArr.map(l=>{
               const hrs=(l.mins/60).toFixed(2);
               const pct=Math.round((l.mins/maxMins)*100);
@@ -1238,9 +1253,10 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
                 </div>
               );
             })}
-          </div>
+          </div>}
         </div>
-      )}
+        );
+      })()}
 
       {/* Active Orders + Search */}
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:10}}>
