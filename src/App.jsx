@@ -4,7 +4,36 @@ import { useState, useEffect, useRef, useCallback } from "react";
 const SUPABASE_URL = "https://mdbziytahdeuegxlqggd.supabase.co";
 const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1kYnppeXRhaGRldWVneGxxZ2dkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk5OTI1MTIsImV4cCI6MjA5NTU2ODUxMn0.iPE2dckL4uVw-YewKxjd2IAq0Hii2-0QxDVQo52wH74";
 
-// ─── SUPABASE ──────────────────────────────────────────────────
+// ─── SUPABASE REALTIME (native WebSocket, no CDN dependency) ───
+// Connects to Supabase Realtime via raw WebSocket + Phoenix protocol
+function makeRealtimeChannel(url, key, table, onEvent, onStatus){
+  const wsUrl = url.replace(/^https/,"wss").replace(/^http/,"ws")
+    + `/realtime/v1/websocket?apikey=${key}&vsn=1.0.0`;
+  let ws, heartbeat, reconnectTimer, destroyed=false;
+  function connect(){
+    ws = new WebSocket(wsUrl);
+    ws.onopen = () => {
+      // Join channel
+      ws.send(JSON.stringify({topic:`realtime:public:${table}`,event:"phx_join",payload:{config:{broadcast:{self:false},presence:{key:""},postgres_changes:[{event:"*",schema:"public",table}]}},ref:"1"}));
+      heartbeat = setInterval(()=>{ if(ws.readyState===1) ws.send(JSON.stringify({topic:"phoenix",event:"heartbeat",payload:{},ref:"hb"})); },25000);
+    };
+    ws.onmessage = (e) => {
+      const msg = JSON.parse(e.data);
+      if(msg.event==="phx_reply"&&msg.payload?.status==="ok") onStatus("SUBSCRIBED");
+      if(msg.event==="postgres_changes") onEvent(msg.payload?.data);
+    };
+    ws.onerror = () => onStatus("CHANNEL_ERROR");
+    ws.onclose = () => {
+      clearInterval(heartbeat);
+      onStatus("CLOSED");
+      if(!destroyed) reconnectTimer = setTimeout(connect, 5000);
+    };
+  }
+  connect();
+  return { remove(){ destroyed=true; clearTimeout(reconnectTimer); clearInterval(heartbeat); if(ws) ws.close(); } };
+}
+
+// ─── SUPABASE REST ─────────────────────────────────────────────
 const sbH = () => ({ apikey:SUPABASE_KEY, Authorization:`Bearer ${SUPABASE_KEY}`, "Content-Type":"application/json", Prefer:"return=representation" });
 const sb = async (path, opts={}) => {
   const {headers:extraHeaders, ...restOpts} = opts;
@@ -253,6 +282,7 @@ function ProductionScheduler({user,onLogout}){
   const [saving,setSaving]=useState(false);
   const [toast,setToast]=useState(null);
   const [activeSearch,setActiveSearch]=useState("");
+  const [rtStatus,setRtStatus]=useState("polling");
   // new order
   const [nf,setNf]=useState({selectedEmployees:[],orderNumber:"",itemId:"",lineId:"",productionQty:"",startDateTime:"",autoFilled:false});
   const [orderSearchQ,setOrderSearchQ]=useState("");
@@ -555,19 +585,35 @@ function ProductionScheduler({user,onLogout}){
   // Today's orders by local start date
   const todayOrders=orders.filter(o=>toLocalDate(o.start_datetime)===td);
 
-  // ── Auto-refresh active orders every 30s ──
+  // ── Realtime + offline handling ──
   useEffect(()=>{
-    const interval=setInterval(async()=>{
-      if(document.hidden)return;
+    let fallbackInterval;
+    const fetchActive=async()=>{
+      if(!navigator.onLine)return;
       try{
         const fresh=await db.getActiveOrders();
-        setOrders(prev=>{
-          const nonActive=prev.filter(o=>o.status!=="In Progress");
-          return [...nonActive,...fresh];
-        });
-      }catch(e){console.warn("Auto-refresh failed:",e.message);}
-    },30000);
-    return()=>clearInterval(interval);
+        setOrders(prev=>[...prev.filter(o=>o.status!=="In Progress"),...fresh]);
+      }catch(e){console.warn("Refresh failed:",e.message);}
+    };
+    const channel=makeRealtimeChannel(
+      SUPABASE_URL, SUPABASE_KEY, "pt_orders",
+      ()=>fetchActive(),
+      (status)=>{
+        if(status==="SUBSCRIBED")setRtStatus("live");
+        else if(status==="CHANNEL_ERROR"||status==="CLOSED")setRtStatus("polling");
+      }
+    );
+    fallbackInterval=setInterval(()=>{if(!document.hidden)fetchActive();},60000);
+    const goOffline=()=>setRtStatus("offline");
+    const goOnline=()=>{setRtStatus("polling");fetchActive();};
+    window.addEventListener("offline",goOffline);
+    window.addEventListener("online",goOnline);
+    return()=>{
+      channel.remove();
+      clearInterval(fallbackInterval);
+      window.removeEventListener("offline",goOffline);
+      window.removeEventListener("online",goOnline);
+    };
   },[]);
 
 
@@ -612,7 +658,7 @@ function ProductionScheduler({user,onLogout}){
         ):(
           <>
           {/* ═══ DASHBOARD ═══ */}
-          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} onEditTimes={openEditTimes} onSwap={openSwap} reload={loadAll} activeSearch={activeSearch} setActiveSearch={setActiveSearch} yearStats={yearStats} deviceLineId={deviceLineId} deviceLineName={localStorage.getItem("prodtrack_device_line_name")||""}/>}
+          {view==="dashboard"&&<Dashboard orders={orders} todayOrders={todayOrders} todayDone={todayDone} todayEffAvg={todayEffAvg} activeOrders={myActiveOrders} items={items} isAdmin={isAdmin} onNewOrder={()=>setView("new")} onClose={openClose} onPause={handlePause} onResume={handleResume} onEditTimes={openEditTimes} onSwap={openSwap} reload={loadAll} activeSearch={activeSearch} setActiveSearch={setActiveSearch} yearStats={yearStats} deviceLineId={deviceLineId} deviceLineName={localStorage.getItem("prodtrack_device_line_name")||""} rtStatus={rtStatus}/>}
 
           {/* ═══ NEW ORDER ═══ */}
           {view==="new"&&(
@@ -1155,7 +1201,7 @@ function ProductionScheduler({user,onLogout}){
 // ══════════════════════════════════════════════════════════════
 //  DASHBOARD
 // ══════════════════════════════════════════════════════════════
-function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,onEditTimes,onSwap,reload,activeSearch,setActiveSearch,yearStats,deviceLineId="",deviceLineName=""}){
+function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,isAdmin,onNewOrder,onClose,onPause,onResume,onEditTimes,onSwap,reload,activeSearch,setActiveSearch,yearStats,deviceLineId="",deviceLineName="",rtStatus="polling"}){
   const td=new Date().toLocaleDateString("en-CA",{timeZone:NZ_TZ});
   const toLocalDate=dt=>{if(!dt)return"";return new Date(dt).toLocaleDateString("en-CA",{timeZone:NZ_TZ});};
   const curMonth=td.slice(0,7); // YYYY-MM
@@ -1264,6 +1310,9 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
           Active Orders ({activeOrders.length})
           {deviceLineId&&!isAdmin&&<span style={{background:"rgba(0,212,170,.1)",color:"#00D4AA",border:"1px solid rgba(0,212,170,.2)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>{deviceLineName||deviceLineId}</span>}
           {isAdmin&&deviceLineId&&<span style={{background:"rgba(255,149,0,.1)",color:"#FF9500",border:"1px solid rgba(255,149,0,.2)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>Admin — All Lines</span>}
+          {rtStatus==="live"&&<span style={{background:"rgba(0,212,170,.12)",color:"#00D4AA",border:"1px solid rgba(0,212,170,.25)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>🟢 Live</span>}
+          {rtStatus==="polling"&&<span style={{background:"rgba(255,193,7,.1)",color:"#FFC107",border:"1px solid rgba(255,193,7,.25)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>🟡 Updating every 60s</span>}
+          {rtStatus==="offline"&&<span style={{background:"rgba(255,82,82,.1)",color:"#FF5252",border:"1px solid rgba(255,82,82,.25)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>🔴 No connection</span>}
         </h2>
         {deviceLineId&&!isAdmin&&<div style={{fontSize:9,color:"#5A5F78",marginBottom:6}}>Showing {deviceLineName||deviceLineId} only · Admin sees all lines</div>}
         <div style={{display:"flex",gap:8}}>
