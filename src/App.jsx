@@ -3063,27 +3063,74 @@ function EfficiencyTrend({orders,employees,items,lines}){
   const RANGES=[
     {key:"3m",label:"Last 3 months",months:3},
     {key:"6m",label:"Last 6 months",months:6},
-    {key:"12m",label:"This year",months:12},
+    {key:"12m",label:"Last 12 months",months:12},
     {key:"all",label:"All time",months:null},
+    {key:"custom",label:"Custom range",months:null},
   ];
   const [range,setRange]=useState("6m");
+  const [customFrom,setCustomFrom]=useState(()=>{
+    const d=new Date(); d.setMonth(d.getMonth()-3);
+    return d.toISOString().slice(0,10);
+  });
+  const [customTo,setCustomTo]=useState(()=>new Date().toISOString().slice(0,10));
   const [fEmp,setFEmp]=useState("All");
   const [fItem,setFItem]=useState("All");
+  const [itemSearch,setItemSearch]=useState("");
+  const [itemDropOpen,setItemDropOpen]=useState(false);
   const [fLine,setFLine]=useState("All");
+  const [trendData,setTrendData]=useState([]);
+  const [loading,setLoading]=useState(false);
+  const cacheRef=useRef({});
+  const itemDropRef=useRef(null);
 
-  const filtered=useMemo(()=>{
+  // Close item dropdown on outside click
+  useEffect(()=>{
+    const handler=e=>{if(itemDropRef.current&&!itemDropRef.current.contains(e.target))setItemDropOpen(false);};
+    document.addEventListener("mousedown",handler);
+    return()=>document.removeEventListener("mousedown",handler);
+  },[]);
+
+  // Fetch historical data based on range
+  useEffect(()=>{
+    let cancelled=false;
     const now=new Date();
     const cfg=RANGES.find(r=>r.key===range);
-    const cutoff=cfg.months?new Date(now.getFullYear(),now.getMonth()-cfg.months+1,1):null;
-    return orders.filter(o=>{
-      if(o.status!=="Completed"||o.efficiency==null||o.efficiency<=0||o.efficiency>500)return false;
-      if(cutoff&&new Date(o.start_datetime)<cutoff)return false;
+    let fromISO,toISO;
+    if(range==="custom"){
+      if(!customFrom||!customTo)return;
+      fromISO=customFrom+"T00:00:00";
+      toISO=customTo+"T23:59:59";
+    }else if(cfg.months){
+      const from=new Date(now.getFullYear(),now.getMonth()-cfg.months+1,1);
+      fromISO=from.toISOString().slice(0,19);
+      toISO=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59).toISOString().slice(0,19);
+    }else{
+      fromISO="2000-01-01T00:00:00";
+      toISO=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59).toISOString().slice(0,19);
+    }
+    const ckey=`${fromISO}|${toISO}`;
+    if(cacheRef.current[ckey]){setTrendData(cacheRef.current[ckey]);return;}
+    const load=async()=>{
+      setLoading(true);
+      try{
+        const data=await sbAll("pt_orders",`start_datetime=gte.${fromISO}&start_datetime=lte.${toISO}&status=eq.Completed&select=id,order_number,item_id,employee,line_id,efficiency,end_qty,start_datetime&order=start_datetime.asc`);
+        if(!cancelled){cacheRef.current[ckey]=data;setTrendData(data);}
+      }catch(e){console.warn("EfficiencyTrend fetch:",e.message);}
+      if(!cancelled)setLoading(false);
+    };
+    load();
+    return()=>{cancelled=true;};
+  },[range,customFrom,customTo]);
+
+  const filtered=useMemo(()=>{
+    return trendData.filter(o=>{
+      if(o.efficiency==null||o.efficiency<=0||o.efficiency>500)return false;
       if(fEmp!=="All"&&o.employee!==fEmp)return false;
       if(fItem!=="All"&&o.item_id!==fItem)return false;
       if(fLine!=="All"&&o.line_id!==fLine)return false;
       return true;
     });
-  },[orders,range,fEmp,fItem,fLine]);
+  },[trendData,fEmp,fItem,fLine]);
 
   // KPIs
   const avgEff=filtered.length?Math.round(filtered.reduce((a,o)=>a+o.efficiency,0)/filtered.length):null;
@@ -3123,30 +3170,96 @@ function EfficiencyTrend({orders,employees,items,lines}){
   const selC="#00D4AA",warnC="#FFC107",badC="#FF4B6E";
   const kpiColor=e=>e==null?"#8B90A8":e>=100?selC:e>=80?warnC:badC;
 
-  const empList=[...new Set(orders.map(o=>o.employee).filter(Boolean))].sort();
-  const itemList=items.map(i=>i.id);
+  const empList=[...new Set(trendData.map(o=>o.employee).filter(Boolean))].sort();
+  const allItemIds=[...new Set([...items.map(i=>i.id),...trendData.map(o=>o.item_id).filter(Boolean)])].sort();
+  const filteredItemIds=itemSearch.trim()?allItemIds.filter(id=>id.toLowerCase().includes(itemSearch.toLowerCase())):allItemIds;
   const lineList=lines.map(l=>l.name||l.id);
+
+  const selStyle={background:"#13161F",border:"1px solid #2A2F45",borderRadius:6,padding:"7px 10px",fontSize:12,color:"#E8EAF0",fontFamily:"'IBM Plex Mono',monospace"};
 
   return(
     <div>
-      <div style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Efficiency Trend</div>
+      <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+        <div style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase"}}>Efficiency Trend</div>
+        {loading&&<span style={{fontSize:10,color:"#7B8CFF",fontWeight:700,background:"rgba(123,140,255,.1)",border:"1px solid rgba(123,140,255,.2)",padding:"2px 8px",borderRadius:8}}>⟳ Loading…</span>}
+      </div>
 
       {/* Filters */}
       <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16,alignItems:"flex-end"}}>
-        {[
-          {label:"Date Range",value:range,set:setRange,opts:RANGES.map(r=>({v:r.key,l:r.label}))},
-          {label:"Employee",value:fEmp,set:setFEmp,opts:[{v:"All",l:"All employees"},...empList.map(e=>({v:e,l:e}))]},
-          {label:"Item",value:fItem,set:setFItem,opts:[{v:"All",l:"All items"},...itemList.map(i=>({v:i,l:i}))]},
-          {label:"Line",value:fLine,set:setFLine,opts:[{v:"All",l:"All lines"},...lineList.map(l=>({v:l,l:l}))]},
-        ].map(f=>(
-          <div key={f.label} style={{display:"flex",flexDirection:"column",gap:4,flex:"1 1 130px",minWidth:120}}>
-            <label style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase"}}>{f.label}</label>
-            <select value={f.value} onChange={e=>f.set(e.target.value)}
-              style={{background:"#13161F",border:"1px solid #2A2F45",borderRadius:6,padding:"7px 10px",fontSize:12,color:"#E8EAF0",fontFamily:"'IBM Plex Mono',monospace"}}>
-              {f.opts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
-            </select>
+
+        {/* Date Range */}
+        <div style={{display:"flex",flexDirection:"column",gap:4,flex:"1 1 140px",minWidth:130}}>
+          <label style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase"}}>Date Range</label>
+          <select value={range} onChange={e=>setRange(e.target.value)} style={selStyle}>
+            {RANGES.map(r=><option key={r.key} value={r.key}>{r.label}</option>)}
+          </select>
+        </div>
+
+        {/* Custom date pickers — only shown when Custom is selected */}
+        {range==="custom"&&<>
+          <div style={{display:"flex",flexDirection:"column",gap:4,flex:"1 1 130px",minWidth:120}}>
+            <label style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase"}}>From</label>
+            <input type="date" value={customFrom} onChange={e=>setCustomFrom(e.target.value)}
+              style={{...selStyle,colorScheme:"dark"}}/>
           </div>
-        ))}
+          <div style={{display:"flex",flexDirection:"column",gap:4,flex:"1 1 130px",minWidth:120}}>
+            <label style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase"}}>To</label>
+            <input type="date" value={customTo} onChange={e=>setCustomTo(e.target.value)}
+              style={{...selStyle,colorScheme:"dark"}}/>
+          </div>
+        </>}
+
+        {/* Employee */}
+        <div style={{display:"flex",flexDirection:"column",gap:4,flex:"1 1 130px",minWidth:120}}>
+          <label style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase"}}>Employee</label>
+          <select value={fEmp} onChange={e=>setFEmp(e.target.value)} style={selStyle}>
+            <option value="All">All employees</option>
+            {empList.map(e=><option key={e} value={e}>{e}</option>)}
+          </select>
+        </div>
+
+        {/* Item — searchable dropdown */}
+        <div ref={itemDropRef} style={{display:"flex",flexDirection:"column",gap:4,flex:"1 1 150px",minWidth:140,position:"relative"}}>
+          <label style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase"}}>Item</label>
+          <div onClick={()=>setItemDropOpen(o=>!o)}
+            style={{...selStyle,cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",userSelect:"none"}}>
+            <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>
+              {fItem==="All"?"All items":fItem}
+            </span>
+            <span style={{marginLeft:6,opacity:.6,fontSize:10}}>{itemDropOpen?"▲":"▼"}</span>
+          </div>
+          {itemDropOpen&&(
+            <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:200,background:"#1A1E2E",border:"1px solid #2A2F45",borderRadius:6,boxShadow:"0 8px 24px rgba(0,0,0,.5)",overflow:"hidden"}}>
+              <div style={{padding:"6px 8px",borderBottom:"1px solid #2A2F45"}}>
+                <input autoFocus placeholder="Search item…" value={itemSearch}
+                  onChange={e=>setItemSearch(e.target.value)}
+                  onClick={e=>e.stopPropagation()}
+                  style={{width:"100%",background:"#13161F",border:"1px solid #2A2F45",borderRadius:4,padding:"5px 8px",fontSize:12,color:"#E8EAF0",fontFamily:"'IBM Plex Mono',monospace",outline:"none",boxSizing:"border-box"}}/>
+              </div>
+              <div style={{maxHeight:180,overflowY:"auto"}}>
+                {[{id:"All",label:"All items"},...filteredItemIds.map(id=>({id,label:id}))].map(opt=>(
+                  <div key={opt.id} onClick={()=>{setFItem(opt.id);setItemSearch("");setItemDropOpen(false);}}
+                    style={{padding:"7px 12px",fontSize:12,color:fItem===opt.id?"#00D4AA":"#E8EAF0",background:fItem===opt.id?"rgba(0,212,170,.08)":"transparent",cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace"}}
+                    onMouseEnter={e=>e.currentTarget.style.background="rgba(255,255,255,.05)"}
+                    onMouseLeave={e=>e.currentTarget.style.background=fItem===opt.id?"rgba(0,212,170,.08)":"transparent"}>
+                    {opt.label}
+                  </div>
+                ))}
+                {filteredItemIds.length===0&&<div style={{padding:"10px 12px",fontSize:11,color:"#4A4F65"}}>No items match</div>}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Line */}
+        <div style={{display:"flex",flexDirection:"column",gap:4,flex:"1 1 130px",minWidth:120}}>
+          <label style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase"}}>Line</label>
+          <select value={fLine} onChange={e=>setFLine(e.target.value)} style={selStyle}>
+            <option value="All">All lines</option>
+            {lineList.map(l=><option key={l} value={l}>{l}</option>)}
+          </select>
+        </div>
+
       </div>
 
       {/* KPI tiles */}
