@@ -3081,6 +3081,8 @@ function EfficiencyTrend({orders,employees,items,lines}){
   const [trendData,setTrendData]=useState([]);
   const [loading,setLoading]=useState(false);
   const cacheRef=useRef({});
+  // Clear cache on mount so end_datetime change takes effect after deploy
+  useEffect(()=>{cacheRef.current={};},[]);
   const itemDropRef=useRef(null);
 
   // Close item dropdown on outside click
@@ -3113,7 +3115,7 @@ function EfficiencyTrend({orders,employees,items,lines}){
     const load=async()=>{
       setLoading(true);
       try{
-        const data=await sbAll("pt_orders",`start_datetime=gte.${fromISO}&start_datetime=lte.${toISO}&status=eq.Completed&select=id,order_number,item_id,employee,line_id,efficiency,end_qty,start_datetime&order=start_datetime.asc`);
+        const data=await sbAll("pt_orders",`start_datetime=gte.${fromISO}&start_datetime=lte.${toISO}&status=eq.Completed&select=id,order_number,item_id,employee,line_id,efficiency,end_qty,start_datetime,end_datetime&order=start_datetime.asc`);
         if(!cancelled){cacheRef.current[ckey]=data;setTrendData(data);}
       }catch(e){console.warn("EfficiencyTrend fetch:",e.message);}
       if(!cancelled)setLoading(false);
