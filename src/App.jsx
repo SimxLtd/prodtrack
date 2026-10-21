@@ -3131,9 +3131,7 @@ function EfficiencyTrend({orders,employees,items,lines}){
     });
   },[trendData,fEmp,fItem,fLine]);
 
-  // KPIs — orders with valid efficiency only for avg; all orders for counts
-  const withEff=filtered.filter(o=>o.efficiency!=null&&o.efficiency>0&&o.efficiency<=500);
-  const avgEff=withEff.length?Math.round(withEff.reduce((a,o)=>a+o.efficiency,0)/withEff.length):null;
+  // KPIs — counts from all orders; avg calculated after monthly data so it matches the chart
   const above100=filtered.filter(o=>(o.efficiency||0)>=100).length;
   const below70=filtered.filter(o=>(o.efficiency||0)<70).length;
 
@@ -3155,6 +3153,11 @@ function EfficiencyTrend({orders,employees,items,lines}){
       count:map[k].count,
     }));
   },[filtered]);
+
+  // Avg efficiency = average of monthly averages (matches what the chart shows)
+  const avgEff=monthlyData.filter(m=>m.avg>0).length
+    ?Math.round(monthlyData.filter(m=>m.avg>0).reduce((a,m)=>a+m.avg,0)/monthlyData.filter(m=>m.avg>0).length)
+    :null;
 
   // SVG chart
   const chartW=640,chartH=160,padL=44,padR=12,padT=20,padB=32;
