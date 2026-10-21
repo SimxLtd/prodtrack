@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 
 // ─── CONFIG ────────────────────────────────────────────────────
 const SUPABASE_URL = "https://mdbziytahdeuegxlqggd.supabase.co";
@@ -800,6 +800,12 @@ function ProductionScheduler({user,onLogout}){
 
               {/* ── Efficiency Distribution Pie ── */}
               <EfficiencyPie orders={orders}/>
+
+              {/* ── Divider ── */}
+              <div style={{height:1,background:"#2A2F45",margin:"22px 0"}}/>
+
+              {/* ── Efficiency Trend ── */}
+              <EfficiencyTrend orders={orders} employees={employees} items={items} lines={lines}/>
 
               {/* ── Divider ── */}
               <div style={{height:1,background:"#2A2F45",margin:"22px 0"}}/>
@@ -3050,6 +3056,160 @@ function EmployeeEfficiency({orders,employees}){
 }
 
 // ══════════════════════════════════════════════════════════════
+// ══════════════════════════════════════════════════════════════
+//  EFFICIENCY TREND
+// ══════════════════════════════════════════════════════════════
+function EfficiencyTrend({orders,employees,items,lines}){
+  const RANGES=[
+    {key:"3m",label:"Last 3 months",months:3},
+    {key:"6m",label:"Last 6 months",months:6},
+    {key:"12m",label:"This year",months:12},
+    {key:"all",label:"All time",months:null},
+  ];
+  const [range,setRange]=useState("6m");
+  const [fEmp,setFEmp]=useState("All");
+  const [fItem,setFItem]=useState("All");
+  const [fLine,setFLine]=useState("All");
+
+  const filtered=useMemo(()=>{
+    const now=new Date();
+    const cfg=RANGES.find(r=>r.key===range);
+    const cutoff=cfg.months?new Date(now.getFullYear(),now.getMonth()-cfg.months+1,1):null;
+    return orders.filter(o=>{
+      if(o.status!=="Completed"||o.efficiency==null||o.efficiency<=0||o.efficiency>500)return false;
+      if(cutoff&&new Date(o.start_datetime)<cutoff)return false;
+      if(fEmp!=="All"&&o.employee!==fEmp)return false;
+      if(fItem!=="All"&&o.item_id!==fItem)return false;
+      if(fLine!=="All"&&o.line_id!==fLine)return false;
+      return true;
+    });
+  },[orders,range,fEmp,fItem,fLine]);
+
+  // KPIs
+  const avgEff=filtered.length?Math.round(filtered.reduce((a,o)=>a+o.efficiency,0)/filtered.length):null;
+  const above100=filtered.filter(o=>o.efficiency>=100).length;
+  const below70=filtered.filter(o=>o.efficiency<70).length;
+
+  // Monthly buckets
+  const monthlyData=useMemo(()=>{
+    const map={};
+    filtered.forEach(o=>{
+      if(!o.start_datetime)return;
+      const d=new Date(o.start_datetime);
+      const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
+      if(!map[key])map[key]={key,effs:[],count:0};
+      map[key].effs.push(o.efficiency);
+      map[key].count++;
+    });
+    return Object.keys(map).sort().map(k=>({
+      key:k,
+      label:new Date(k+"-01").toLocaleDateString("en-NZ",{month:"short",year:"2-digit"}),
+      avg:Math.round(map[k].effs.reduce((a,v)=>a+v,0)/map[k].effs.length),
+      count:map[k].count,
+    }));
+  },[filtered]);
+
+  // SVG chart
+  const chartW=640,chartH=160,padL=44,padR=12,padT=20,padB=32;
+  const plotW=chartW-padL-padR,plotH=chartH-padT-padB;
+  const vals=monthlyData.map(m=>m.avg);
+  const minV=vals.length?Math.min(50,Math.min(...vals)-5):50;
+  const maxV=vals.length?Math.max(130,Math.max(...vals)+5):130;
+  const yScale=v=>padT+plotH-(v-minV)/(maxV-minV)*plotH;
+  const xScale=i=>monthlyData.length<2?padL+plotW/2:padL+i*(plotW/(monthlyData.length-1));
+  const target100=yScale(100);
+  const pts=monthlyData.map((m,i)=>`${xScale(i)},${yScale(m.avg)}`).join(" ");
+
+  const selC="#00D4AA",warnC="#FFC107",badC="#FF4B6E";
+  const kpiColor=e=>e==null?"#8B90A8":e>=100?selC:e>=80?warnC:badC;
+
+  const empList=[...new Set(orders.map(o=>o.employee).filter(Boolean))].sort();
+  const itemList=items.map(i=>i.id);
+  const lineList=lines.map(l=>l.name||l.id);
+
+  return(
+    <div>
+      <div style={{fontSize:13,color:"#8B90A8",letterSpacing:2,textTransform:"uppercase",marginBottom:14}}>Efficiency Trend</div>
+
+      {/* Filters */}
+      <div style={{display:"flex",gap:10,flexWrap:"wrap",marginBottom:16,alignItems:"flex-end"}}>
+        {[
+          {label:"Date Range",value:range,set:setRange,opts:RANGES.map(r=>({v:r.key,l:r.label}))},
+          {label:"Employee",value:fEmp,set:setFEmp,opts:[{v:"All",l:"All employees"},...empList.map(e=>({v:e,l:e}))]},
+          {label:"Item",value:fItem,set:setFItem,opts:[{v:"All",l:"All items"},...itemList.map(i=>({v:i,l:i}))]},
+          {label:"Line",value:fLine,set:setFLine,opts:[{v:"All",l:"All lines"},...lineList.map(l=>({v:l,l:l}))]},
+        ].map(f=>(
+          <div key={f.label} style={{display:"flex",flexDirection:"column",gap:4,flex:"1 1 130px",minWidth:120}}>
+            <label style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase"}}>{f.label}</label>
+            <select value={f.value} onChange={e=>f.set(e.target.value)}
+              style={{background:"#13161F",border:"1px solid #2A2F45",borderRadius:6,padding:"7px 10px",fontSize:12,color:"#E8EAF0",fontFamily:"'IBM Plex Mono',monospace"}}>
+              {f.opts.map(o=><option key={o.v} value={o.v}>{o.l}</option>)}
+            </select>
+          </div>
+        ))}
+      </div>
+
+      {/* KPI tiles */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))",gap:10,marginBottom:18}}>
+        {[
+          {label:"Avg Efficiency",value:avgEff!=null?avgEff+"%":"—",color:kpiColor(avgEff)},
+          {label:"Orders Completed",value:filtered.length,color:"#E8EAF0"},
+          {label:"Above 100%",value:above100,color:selC,sub:`${filtered.length?Math.round(above100/filtered.length*100):0}% of orders`},
+          {label:"Below 70%",value:below70,color:badC,sub:`${filtered.length?Math.round(below70/filtered.length*100):0}% of orders`},
+        ].map(t=>(
+          <div key={t.label} style={{background:"#13161F",border:"1px solid #2A2F45",borderRadius:8,padding:"12px 14px"}}>
+            <div style={{fontSize:9,color:"#5A5F78",letterSpacing:1,textTransform:"uppercase",marginBottom:6}}>{t.label}</div>
+            <div style={{fontSize:24,fontWeight:700,color:t.color,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>{t.value}</div>
+            {t.sub&&<div style={{fontSize:9,color:"#5A5F78",marginTop:4}}>{t.sub}</div>}
+          </div>
+        ))}
+      </div>
+
+      {/* Chart */}
+      {monthlyData.length===0?(
+        <div style={{textAlign:"center",padding:32,color:"#4A4F65",fontSize:12}}>No completed orders for this period.</div>
+      ):(
+        <div style={{background:"#13161F",border:"1px solid #2A2F45",borderRadius:8,padding:"14px 16px"}}>
+          <div style={{fontSize:10,color:"#5A5F78",marginBottom:10}}>Monthly average efficiency · dashed line = 100% target</div>
+          <div style={{overflowX:"auto"}}>
+            <svg viewBox={`0 0 ${chartW} ${chartH}`} width="100%" style={{display:"block",minWidth:280}}>
+              {/* Grid */}
+              {[60,70,80,90,100,110,120].map(v=>(v>=minV&&v<=maxV)&&(
+                <g key={v}>
+                  <line x1={padL} y1={yScale(v)} x2={chartW-padR} y2={yScale(v)} stroke="#2A2F45" strokeWidth="1" strokeDasharray={v===100?"5,3":"none"}/>
+                  <text x={padL-6} y={yScale(v)+4} textAnchor="end" fontSize="9" fill="#5A5F78" fontFamily="IBM Plex Mono,monospace">{v}%</text>
+                </g>
+              ))}
+              {/* 100% line accent */}
+              <line x1={padL} y1={target100} x2={chartW-padR} y2={target100} stroke="#7B8CFF" strokeWidth="1" strokeDasharray="5,3" opacity="0.5"/>
+              {/* Area */}
+              {monthlyData.length>1&&(
+                <polygon points={`${xScale(0)},${chartH-padB} ${pts} ${xScale(monthlyData.length-1)},${chartH-padB}`}
+                  fill="rgba(0,212,170,0.07)"/>
+              )}
+              {/* Line */}
+              {monthlyData.length>1&&<polyline points={pts} fill="none" stroke="#00D4AA" strokeWidth="2" strokeLinejoin="round"/>}
+              {/* Dots + labels */}
+              {monthlyData.map((m,i)=>{
+                const x=xScale(i),y=yScale(m.avg);
+                const c=kpiColor(m.avg);
+                return(
+                  <g key={m.key}>
+                    <circle cx={x} cy={y} r="5" fill={c} stroke="#13161F" strokeWidth="2"/>
+                    <text x={x} y={y-10} textAnchor="middle" fontSize="10" fontWeight="700" fill={c} fontFamily="IBM Plex Mono,monospace">{m.avg}%</text>
+                    <text x={x} y={chartH-padB+14} textAnchor="middle" fontSize="9" fill="#5A5F78" fontFamily="IBM Plex Mono,monospace">{m.label}</text>
+                  </g>
+                );
+              })}
+            </svg>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
 //  EFFICIENCY PIE CHART
 // ══════════════════════════════════════════════════════════════
 function EfficiencyPie({orders}){
@@ -3061,6 +3221,7 @@ function EfficiencyPie({orders}){
   const [view,setPieView]=useState("month"); // "month" | "today"
   const [selYear,setSelYear]=useState(curNZYear);
   const [selMonth,setSelMonth]=useState(curNZMonth);
+  const [selectedBand,setSelectedBand]=useState(null);
   const [monthCache,setMonthCache]=useState({});
   const [monthLoading,setMonthLoading]=useState(false);
   const svgRef=useRef(null);
@@ -3147,13 +3308,20 @@ function EfficiencyPie({orders}){
       const [x2,y2]=polar(cx,cy,R,end);
       const [x3,y3]=polar(cx,cy,r,end);
       const [x4,y4]=polar(cx,cy,r,start);
+      const isSelected=selectedBand===b.key;
+
+      const g=document.createElementNS(ns,"g");
+      if(isSelected){const mid=start+sweep/2;const ox=Math.cos(mid)*6,oy=Math.sin(mid)*6;g.setAttribute("transform",`translate(${ox},${oy})`);}
+      g.style.cursor="pointer";
+      g.addEventListener("click",()=>setSelectedBand(prev=>prev===b.key?null:b.key));
 
       const path=document.createElementNS(ns,"path");
       path.setAttribute("d",`M${x1} ${y1} A${R} ${R} 0 ${large} 1 ${x2} ${y2} L${x3} ${y3} A${r} ${r} 0 ${large} 0 ${x4} ${y4}Z`);
       path.setAttribute("fill",b.color);
       path.setAttribute("stroke","#1A1D27");
       path.setAttribute("stroke-width","3");
-      svg.appendChild(path);
+      path.setAttribute("opacity",selectedBand&&!isSelected?"0.4":"1");
+      g.appendChild(path);
 
       // Label inside slice
       if(sweep>0.25){
@@ -3166,19 +3334,20 @@ function EfficiencyPie({orders}){
         t1.setAttribute("x",lx);t1.setAttribute("y",ly-6);
         t1.setAttribute("text-anchor","middle");t1.setAttribute("dominant-baseline","middle");
         t1.setAttribute("fill","#FFFFFF");t1.setAttribute("font-size","13");t1.setAttribute("font-weight","700");
-        t1.setAttribute("font-family","IBM Plex Mono,monospace");
+        t1.setAttribute("font-family","IBM Plex Mono,monospace");t1.setAttribute("pointer-events","none");
         t1.textContent=b.count;
-        svg.appendChild(t1);
+        g.appendChild(t1);
 
         const t2=document.createElementNS(ns,"text");
         t2.setAttribute("x",lx);t2.setAttribute("y",ly+9);
         t2.setAttribute("text-anchor","middle");t2.setAttribute("dominant-baseline","middle");
         t2.setAttribute("fill","rgba(255,255,255,0.85)");t2.setAttribute("font-size","10");
-        t2.setAttribute("font-family","IBM Plex Mono,monospace");
+        t2.setAttribute("font-family","IBM Plex Mono,monospace");t2.setAttribute("pointer-events","none");
         t2.textContent=pct+"%";
-        svg.appendChild(t2);
+        g.appendChild(t2);
       }
 
+      svg.appendChild(g);
       start=end;
     });
 
@@ -3187,7 +3356,7 @@ function EfficiencyPie({orders}){
     hole.setAttribute("cx",cx);hole.setAttribute("cy",cy);hole.setAttribute("r",r-1);
     hole.setAttribute("fill","#1A1D27");
     svg.appendChild(hole);
-  },[total,selYear,selMonth,view,monthCache,isCurrentMonth]);
+  },[total,selYear,selMonth,view,monthCache,isCurrentMonth,selectedBand,banded]);
 
   const fmtNum=n=>n>=1000?(n/1000).toFixed(1)+"k":String(n);
 
@@ -3251,8 +3420,9 @@ function EfficiencyPie({orders}){
           <div style={{position:"relative",flexShrink:0}}>
             <svg ref={svgRef} width="230" height="230" viewBox="0 0 230 230"/>
             <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",textAlign:"center",pointerEvents:"none"}}>
-              <div style={{fontSize:22,fontWeight:700,color:"#E8EAF0",lineHeight:1}}>{total}</div>
-              <div style={{fontSize:9,color:"#5A5F78",marginTop:2}}>orders</div>
+              {selectedBand?(()=>{const sb=banded.find(b=>b.key===selectedBand);return(<><div style={{fontSize:22,fontWeight:700,color:sb.color,lineHeight:1}}>{sb.count}</div><div style={{fontSize:9,color:"#5A5F78",marginTop:2}}>orders</div></>);})():(
+                <><div style={{fontSize:22,fontWeight:700,color:"#E8EAF0",lineHeight:1}}>{total}</div><div style={{fontSize:9,color:"#5A5F78",marginTop:2}}>orders</div></>
+              )}
             </div>
           </div>
 
@@ -3260,7 +3430,8 @@ function EfficiencyPie({orders}){
           <div style={{flex:1,minWidth:260,overflowX:"auto"}}>
             <div style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:14}}>
               {banded.map(b=>(
-                <div key={b.key} style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:"#8B90A8"}}>
+                <div key={b.key} onClick={()=>setSelectedBand(prev=>prev===b.key?null:b.key)}
+                  style={{display:"flex",alignItems:"center",gap:6,fontSize:10,color:selectedBand===b.key?b.color:"#8B90A8",cursor:"pointer",padding:"3px 6px",borderRadius:4,background:selectedBand===b.key?`${b.color}18`:"transparent",border:`1px solid ${selectedBand===b.key?b.color+"44":"transparent"}`}}>
                   <div style={{width:11,height:11,borderRadius:"50%",background:b.color,flexShrink:0}}/>
                   {b.range} {b.label}
                 </div>
@@ -3298,10 +3469,54 @@ function EfficiencyPie({orders}){
                 </tr>
               </tbody>
             </table>
-            <div style={{fontSize:9,color:"#5A5F78",marginTop:8}}>Completed orders only · Orders without efficiency score excluded</div>
+            <div style={{fontSize:9,color:"#5A5F78",marginTop:8}}>Completed orders only · Orders without efficiency score excluded · Click a segment or band to drill in</div>
           </div>
         </div>
       )}
+
+      {/* ── Drill-down table ── */}
+      {selectedBand&&(()=>{
+        const sb=banded.find(b=>b.key===selectedBand);
+        const drillOrders=sb.orders.sort((a,b)=>b.efficiency-a.efficiency);
+        return(
+          <div style={{marginTop:18,borderTop:"1px solid #2A2F45",paddingTop:18}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12,flexWrap:"wrap",gap:8}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{background:`${sb.color}22`,color:sb.color,border:`1px solid ${sb.color}44`,borderRadius:20,padding:"3px 10px",fontSize:11,fontWeight:700,fontFamily:"'IBM Plex Mono',monospace"}}>{sb.emoji} {sb.label} {sb.range}</span>
+                <span style={{fontSize:11,color:"#8B90A8"}}>{drillOrders.length} orders</span>
+              </div>
+              <button onClick={()=>setSelectedBand(null)} style={{background:"#1A1D27",border:"1px solid #2A2F45",color:"#8B90A8",borderRadius:6,padding:"4px 10px",fontSize:11,cursor:"pointer",fontFamily:"'IBM Plex Mono',monospace"}}>✕ Close</button>
+            </div>
+            <div style={{overflowX:"auto"}}>
+              <table style={{width:"100%",borderCollapse:"collapse",fontSize:11}}>
+                <thead>
+                  <tr style={{borderBottom:"1px solid #2A2F45"}}>
+                    {["Order #","Item","Employee","Date","Qty","Efficiency"].map(h=>(
+                      <th key={h} style={{padding:"7px 10px",textAlign:h==="Efficiency"||h==="Qty"?"right":"left",color:"#5A5F78",fontSize:9,letterSpacing:1,textTransform:"uppercase",whiteSpace:"nowrap"}}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {drillOrders.map((o,i)=>(
+                    <tr key={o.id||i} style={{borderBottom:"1px solid #1E2135"}}
+                      onMouseEnter={e=>e.currentTarget.style.background="#1A1F30"}
+                      onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                      <td style={{padding:"8px 10px",fontFamily:"'IBM Plex Mono',monospace",fontSize:11}}>{o.order_number}</td>
+                      <td style={{padding:"8px 10px",color:"#7B8CFF",fontFamily:"'IBM Plex Mono',monospace",fontSize:11}}>{o.item_id}</td>
+                      <td style={{padding:"8px 10px",color:"#C8CADC"}}>{o.employee}</td>
+                      <td style={{padding:"8px 10px",color:"#8B90A8",whiteSpace:"nowrap"}}>{o.start_datetime?new Date(o.start_datetime).toLocaleDateString("en-NZ",{day:"2-digit",month:"short",timeZone:NZ_TZ}):"—"}</td>
+                      <td style={{padding:"8px 10px",textAlign:"right",fontFamily:"'IBM Plex Mono',monospace"}}>{(o.end_qty||0).toLocaleString()}</td>
+                      <td style={{padding:"8px 10px",textAlign:"right"}}>
+                        <span style={{background:`${sb.color}22`,color:sb.color,border:`1px solid ${sb.color}44`,borderRadius:20,padding:"2px 8px",fontSize:11,fontWeight:700,fontFamily:"'IBM Plex Mono',monospace"}}>{Math.round(o.efficiency)}%</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
