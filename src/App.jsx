@@ -3124,7 +3124,6 @@ function EfficiencyTrend({orders,employees,items,lines}){
 
   const filtered=useMemo(()=>{
     return trendData.filter(o=>{
-      if(o.efficiency==null||o.efficiency<=0||o.efficiency>500)return false;
       if(fEmp!=="All"&&o.employee!==fEmp)return false;
       if(fItem!=="All"&&o.item_id!==fItem)return false;
       if(fLine!=="All"&&o.line_id!==fLine)return false;
@@ -3132,10 +3131,11 @@ function EfficiencyTrend({orders,employees,items,lines}){
     });
   },[trendData,fEmp,fItem,fLine]);
 
-  // KPIs
-  const avgEff=filtered.length?Math.round(filtered.reduce((a,o)=>a+o.efficiency,0)/filtered.length):null;
-  const above100=filtered.filter(o=>o.efficiency>=100).length;
-  const below70=filtered.filter(o=>o.efficiency<70).length;
+  // KPIs — orders with valid efficiency only for avg; all orders for counts
+  const withEff=filtered.filter(o=>o.efficiency!=null&&o.efficiency>0&&o.efficiency<=500);
+  const avgEff=withEff.length?Math.round(withEff.reduce((a,o)=>a+o.efficiency,0)/withEff.length):null;
+  const above100=filtered.filter(o=>(o.efficiency||0)>=100).length;
+  const below70=filtered.filter(o=>(o.efficiency||0)<70).length;
 
   // Monthly buckets
   const monthlyData=useMemo(()=>{
@@ -3145,13 +3145,13 @@ function EfficiencyTrend({orders,employees,items,lines}){
       const d=new Date(o.start_datetime);
       const key=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
       if(!map[key])map[key]={key,effs:[],count:0};
-      map[key].effs.push(o.efficiency);
+      if(o.efficiency!=null&&o.efficiency>0&&o.efficiency<=500)map[key].effs.push(o.efficiency);
       map[key].count++;
     });
     return Object.keys(map).sort().map(k=>({
       key:k,
       label:new Date(k+"-01").toLocaleDateString("en-NZ",{month:"short",year:"2-digit"}),
-      avg:Math.round(map[k].effs.reduce((a,v)=>a+v,0)/map[k].effs.length),
+      avg:map[k].effs.length?Math.round(map[k].effs.reduce((a,v)=>a+v,0)/map[k].effs.length):0,
       count:map[k].count,
     }));
   },[filtered]);
