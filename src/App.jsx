@@ -319,9 +319,9 @@ function ProductionScheduler({user,onLogout}){
       const now=new Date();
       const y=now.toLocaleDateString("en-CA",{timeZone:NZ_TZ}).slice(0,4);
       const m=now.toLocaleDateString("en-CA",{timeZone:NZ_TZ}).slice(5,7);
-      const monthFrom=`${y}-${m}-01T00:00:00`;
+      const monthFrom=new Date(`${y}-${m}-01T00:00:00+13:00`).toISOString().slice(0,19);
       const lastDay=new Date(Number(y),Number(m),0).getDate();
-      const monthTo=`${y}-${m}-${String(lastDay).padStart(2,"0")}T23:59:59`;
+      const monthTo=new Date(`${y}-${m}-${String(lastDay).padStart(2,"0")}T23:59:59+13:00`).toISOString().slice(0,19);
 
       // Tier 1a: current month's full order records (for stats/records/search/employee eff)
       // Tier 1b: ALL active orders regardless of start date (so nothing running gets hidden)
