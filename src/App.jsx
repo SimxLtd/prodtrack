@@ -3100,15 +3100,17 @@ function EfficiencyTrend({orders,employees,items,lines}){
     let fromISO,toISO;
     if(range==="custom"){
       if(!customFrom||!customTo)return;
-      fromISO=customFrom+"T00:00:00";
-      toISO=customTo+"T23:59:59";
-    }else if(cfg.months){
-      const from=new Date(now.getFullYear(),now.getMonth()-cfg.months+1,1);
-      fromISO=from.toISOString().slice(0,19);
-      toISO=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59).toISOString().slice(0,19);
+      // Convert NZ date boundaries to UTC (NZ is UTC+13)
+      fromISO=new Date(customFrom+"T00:00:00+13:00").toISOString().slice(0,19);
+      toISO=new Date(customTo+"T23:59:59+13:00").toISOString().slice(0,19);
     }else{
-      fromISO="2000-01-01T00:00:00";
-      toISO=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59).toISOString().slice(0,19);
+      // Build from/to as NZ date strings then convert to UTC
+      const fromDate=new Date(now);
+      if(cfg.months){fromDate.setMonth(fromDate.getMonth()-cfg.months+1);fromDate.setDate(1);}
+      const fromNZStr=cfg.months?fromDate.toLocaleDateString("en-CA",{timeZone:NZ_TZ}):"2000-01-01";
+      const toNZStr=new Date(now.getFullYear(),now.getMonth()+1,0).toLocaleDateString("en-CA",{timeZone:NZ_TZ});
+      fromISO=new Date(fromNZStr+"T00:00:00+13:00").toISOString().slice(0,19);
+      toISO=new Date(toNZStr+"T23:59:59+13:00").toISOString().slice(0,19);
     }
     // Never cache ranges that include the current month — data changes throughout the day
     const curMonthPrefix=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
