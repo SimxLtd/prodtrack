@@ -3110,13 +3110,19 @@ function EfficiencyTrend({orders,employees,items,lines}){
       fromISO="2000-01-01T00:00:00";
       toISO=new Date(now.getFullYear(),now.getMonth()+1,0,23,59,59).toISOString().slice(0,19);
     }
+    // Never cache ranges that include the current month — data changes throughout the day
+    const curMonthPrefix=`${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,"0")}`;
+    const includesCurrentMonth=toISO.startsWith(curMonthPrefix)||toISO>curMonthPrefix;
     const ckey=`${fromISO}|${toISO}`;
-    if(cacheRef.current[ckey]){setTrendData(cacheRef.current[ckey]);return;}
+    if(!includesCurrentMonth&&cacheRef.current[ckey]){setTrendData(cacheRef.current[ckey]);return;}
     const load=async()=>{
       setLoading(true);
       try{
         const data=await sbAll("pt_orders",`start_datetime=gte.${fromISO}&start_datetime=lte.${toISO}&status=eq.Completed&select=id,order_number,item_id,employee,line_id,efficiency,end_qty,start_datetime,end_datetime&order=start_datetime.asc`);
-        if(!cancelled){cacheRef.current[ckey]=data;setTrendData(data);}
+        if(!cancelled){
+          if(!includesCurrentMonth)cacheRef.current[ckey]=data;
+          setTrendData(data);
+        }
       }catch(e){console.warn("EfficiencyTrend fetch:",e.message);}
       if(!cancelled)setLoading(false);
     };
@@ -3162,7 +3168,7 @@ function EfficiencyTrend({orders,employees,items,lines}){
     :null;
 
   // SVG chart
-  const chartW=640,chartH=160,padL=44,padR=12,padT=20,padB=32;
+  const chartW=640,chartH=170,padL=44,padR=12,padT=20,padB=42;
   const plotW=chartW-padL-padR,plotH=chartH-padT-padB;
   const vals=monthlyData.map(m=>m.avg);
   const minV=vals.length?Math.min(50,Math.min(...vals)-5):50;
@@ -3288,7 +3294,7 @@ function EfficiencyTrend({orders,employees,items,lines}){
         <div style={{textAlign:"center",padding:32,color:"#4A4F65",fontSize:12}}>No completed orders for this period.</div>
       ):(
         <div style={{background:"#13161F",border:"1px solid #2A2F45",borderRadius:8,padding:"14px 16px"}}>
-          <div style={{fontSize:10,color:"#5A5F78",marginBottom:10}}>Monthly average efficiency · dashed line = 100% target</div>
+          <div style={{fontSize:10,color:"#5A5F78",marginBottom:10}}>Monthly average efficiency · order count shown below each month · dashed line = 100% target</div>
           <div style={{overflowX:"auto"}}>
             <svg viewBox={`0 0 ${chartW} ${chartH}`} width="100%" style={{display:"block",minWidth:280}}>
               {/* Grid */}
@@ -3316,6 +3322,7 @@ function EfficiencyTrend({orders,employees,items,lines}){
                     <circle cx={x} cy={y} r="5" fill={c} stroke="#13161F" strokeWidth="2"/>
                     <text x={x} y={y-10} textAnchor="middle" fontSize="10" fontWeight="700" fill={c} fontFamily="IBM Plex Mono,monospace">{m.avg}%</text>
                     <text x={x} y={chartH-padB+14} textAnchor="middle" fontSize="9" fill="#5A5F78" fontFamily="IBM Plex Mono,monospace">{m.label}</text>
+                    <text x={x} y={chartH-padB+26} textAnchor="middle" fontSize="9" fill="#4A4F65" fontFamily="IBM Plex Mono,monospace">{m.count} orders</text>
                   </g>
                 );
               })}
