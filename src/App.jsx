@@ -585,9 +585,8 @@ function ProductionScheduler({user,onLogout}){
   // Today's orders by local start date
   const todayOrders=orders.filter(o=>toLocalDate(o.start_datetime)===td);
 
-  // ── Realtime + offline handling ──
+  // ── Polling-based refresh (30s) — Realtime WebSocket removed to reduce server memory ──
   useEffect(()=>{
-    let fallbackInterval;
     const fetchActive=async()=>{
       if(!navigator.onLine)return;
       try{
@@ -595,22 +594,13 @@ function ProductionScheduler({user,onLogout}){
         setOrders(prev=>[...prev.filter(o=>o.status!=="In Progress"),...fresh]);
       }catch(e){console.warn("Refresh failed:",e.message);}
     };
-    const channel=makeRealtimeChannel(
-      SUPABASE_URL, SUPABASE_KEY, "pt_orders",
-      ()=>fetchActive(),
-      (status)=>{
-        if(status==="SUBSCRIBED")setRtStatus("live");
-        else if(status==="CHANNEL_ERROR"||status==="CLOSED")setRtStatus("polling");
-      }
-    );
-    fallbackInterval=setInterval(()=>{if(!document.hidden)fetchActive();},60000);
+    const pollInterval=setInterval(()=>{if(!document.hidden)fetchActive();},30000);
     const goOffline=()=>setRtStatus("offline");
     const goOnline=()=>{setRtStatus("polling");fetchActive();};
     window.addEventListener("offline",goOffline);
     window.addEventListener("online",goOnline);
     return()=>{
-      channel.remove();
-      clearInterval(fallbackInterval);
+      clearInterval(pollInterval);
       window.removeEventListener("offline",goOffline);
       window.removeEventListener("online",goOnline);
     };
@@ -1316,8 +1306,7 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
           Active Orders ({activeOrders.length})
           {deviceLineId&&!isAdmin&&<span style={{background:"rgba(0,212,170,.1)",color:"#00D4AA",border:"1px solid rgba(0,212,170,.2)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>{deviceLineName||deviceLineId}</span>}
           {isAdmin&&deviceLineId&&<span style={{background:"rgba(255,149,0,.1)",color:"#FF9500",border:"1px solid rgba(255,149,0,.2)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>Admin — All Lines</span>}
-          {rtStatus==="live"&&<span style={{background:"rgba(0,212,170,.12)",color:"#00D4AA",border:"1px solid rgba(0,212,170,.25)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>🟢 Live</span>}
-          {rtStatus==="polling"&&<span style={{background:"rgba(255,193,7,.1)",color:"#FFC107",border:"1px solid rgba(255,193,7,.25)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>🟡 Updating every 60s</span>}
+          {rtStatus==="polling"&&<span style={{background:"rgba(255,193,7,.1)",color:"#FFC107",border:"1px solid rgba(255,193,7,.25)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>🟡 Updating every 30s</span>}
           {rtStatus==="offline"&&<span style={{background:"rgba(255,82,82,.1)",color:"#FF5252",border:"1px solid rgba(255,82,82,.25)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>🔴 No connection</span>}
         </h2>
         {deviceLineId&&!isAdmin&&<div style={{fontSize:9,color:"#5A5F78",marginBottom:6}}>Showing {deviceLineName||deviceLineId} only · Admin sees all lines</div>}
