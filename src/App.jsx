@@ -125,6 +125,9 @@ async function idbRemoveFromQueue(qid){
 async function idbClearOrders(){
   try{const d=await openIDB();const tx=d.transaction("orders","readwrite");tx.objectStore("orders").clear();await new Promise((r,j)=>{tx.oncomplete=r;tx.onerror=j;});}catch(e){console.warn("idbClearOrders:",e);}
 }
+async function idbDeleteOrder(id){
+  try{const d=await openIDB();const tx=d.transaction("orders","readwrite");tx.objectStore("orders").delete(id);await new Promise((r,j)=>{tx.oncomplete=r;tx.onerror=j;});}catch(e){console.warn("idbDeleteOrder:",e);}
+}
 
 // ─── HELPERS ───────────────────────────────────────────────────
 const NZ_TZ  = "Pacific/Auckland";
@@ -582,9 +585,11 @@ function ProductionScheduler({user,onLogout}){
         working_minutes:Math.round(workMins*10)/10,efficiency:eff,
         ...(finalSegments?{employee_segments:finalSegments}:{}),
       };
-      // Always update local state immediately
+      // Remove from active orders in React state immediately (status→Completed removes it from dashboard)
       setOrders(p=>p.map(o=>o.id===cm.id?{...o,...patch}:o));
-      idbSaveOrders([{...cm,...patch}]);
+      // Remove from IDB active orders cache — completed orders don't belong there
+      // (if we saved it back, the next IDB hydration would resurrect it in Active Orders)
+      idbDeleteOrder(cm.id);
       if(!navigator.onLine||cm._isOffline){
         await idbAddToQueue({type:"updateOrder",id:cm.id,patch});
         showToast(`Order ${cm.order_number} closed offline — will sync when connected.`,"warn");
@@ -598,7 +603,7 @@ function ProductionScheduler({user,onLogout}){
           showToast(`Closed locally — sync pending.`,"warn");
         }
       }
-      setCm(null); if(sr?.id===cm.id)setSr(null); setView(isAdmin?"records":"dashboard");
+      setCm(null); if(sr?.id===cm.id)setSr(null); setView("dashboard");
     }catch(e){showToast("Failed: "+e.message,"error");}
     setSaving(false);
   };
