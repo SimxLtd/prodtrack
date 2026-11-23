@@ -701,14 +701,26 @@ function ProductionScheduler({user,onLogout}){
       if(!queue.length) return;
       setRtStatus("syncing");
       let synced=0;
+      // Build a map of tempId → real Supabase ID as we resolve addOrder items
+      const idMap={};
       for(const item of queue){
         try{
           if(item.type==="updateOrder"){
-            await db.updateOrder(item.id,item.patch);
+            // Resolve temp ID → real ID if this order was created offline in same session
+            const realId=idMap[item.id]||item.id;
+            if(realId.startsWith("temp-")){
+              // Real ID not resolved yet — skip, will be stale
+              console.warn("flushQueue: skipping updateOrder with unresolved tempId",realId);
+              await idbRemoveFromQueue(item.qid);
+              continue;
+            }
+            await db.updateOrder(realId,item.patch);
           } else if(item.type==="addOrder"){
             const res=await db.addOrder(item.order);
             const real=res[0];
             if(real&&item.tempId){
+              // Store mapping so subsequent patches in this queue use the real ID
+              idMap[item.tempId]=real.id;
               setOrders(prev=>prev.map(o=>o.id===item.tempId?{...o,...real}:o));
               idbClearOrders();
             }
