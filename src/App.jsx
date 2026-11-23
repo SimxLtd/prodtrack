@@ -728,8 +728,15 @@ function ProductionScheduler({user,onLogout}){
     const goOnline=async()=>{
       setRtStatus("syncing");
       await flushQueue();
+      // Small delay so Supabase has committed all patches before we re-fetch
+      await new Promise(r=>setTimeout(r,1500));
       setRtStatus("polling");
-      fetchActive();
+      // Full replace after sync — don't merge with potentially stale local state
+      try{
+        const fresh=await db.getActiveOrders();
+        setOrders(prev=>[...prev.filter(o=>o.status==="Completed"),...fresh]);
+        idbSaveOrders(fresh);
+      }catch(e){fetchActive();};
     };
     window.addEventListener("offline",goOffline);
     window.addEventListener("online",goOnline);
