@@ -86,6 +86,46 @@ const db = {
   findPlanned:    (n)     => sb(`pt_planned_orders?order_number=eq.${encodeURIComponent(n)}`),
 };
 
+// ─── INDEXEDDB OFFLINE STORE ──────────────────────────────────
+const IDB_NAME="prodtrack-offline", IDB_VER=1;
+function openIDB(){
+  return new Promise((resolve,reject)=>{
+    const req=indexedDB.open(IDB_NAME,IDB_VER);
+    req.onupgradeneeded=e=>{
+      const d=e.target.result;
+      if(!d.objectStoreNames.contains("orders"))        d.createObjectStore("orders",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("plannedOrders")) d.createObjectStore("plannedOrders",{keyPath:"id"});
+      if(!d.objectStoreNames.contains("pendingQueue"))  d.createObjectStore("pendingQueue",{keyPath:"qid",autoIncrement:true});
+    };
+    req.onsuccess=e=>resolve(e.target.result);
+    req.onerror=e=>reject(e.target.error);
+  });
+}
+async function idbSaveOrders(orders){
+  try{const d=await openIDB();const tx=d.transaction("orders","readwrite");const st=tx.objectStore("orders");orders.forEach(o=>st.put(o));await new Promise((r,j)=>{tx.oncomplete=r;tx.onerror=j;});}catch(e){console.warn("idbSaveOrders:",e);}
+}
+async function idbGetOrders(){
+  try{const d=await openIDB();const tx=d.transaction("orders","readonly");const st=tx.objectStore("orders");return new Promise((r,j)=>{const q=st.getAll();q.onsuccess=()=>r(q.result);q.onerror=j;});}catch(e){console.warn("idbGetOrders:",e);return[];}
+}
+async function idbSavePlanned(orders){
+  try{const d=await openIDB();const tx=d.transaction("plannedOrders","readwrite");const st=tx.objectStore("plannedOrders");orders.forEach(o=>st.put(o));await new Promise((r,j)=>{tx.oncomplete=r;tx.onerror=j;});}catch(e){console.warn("idbSavePlanned:",e);}
+}
+async function idbGetPlanned(){
+  try{const d=await openIDB();const tx=d.transaction("plannedOrders","readonly");const st=tx.objectStore("plannedOrders");return new Promise((r,j)=>{const q=st.getAll();q.onsuccess=()=>r(q.result);q.onerror=j;});}catch(e){console.warn("idbGetPlanned:",e);return[];}
+}
+async function idbAddToQueue(item){
+  try{const d=await openIDB();const tx=d.transaction("pendingQueue","readwrite");tx.objectStore("pendingQueue").add({...item,ts:Date.now()});await new Promise((r,j)=>{tx.oncomplete=r;tx.onerror=j;});}catch(e){console.warn("idbAddToQueue:",e);}
+}
+async function idbGetQueue(){
+  try{const d=await openIDB();const tx=d.transaction("pendingQueue","readonly");const st=tx.objectStore("pendingQueue");return new Promise((r,j)=>{const q=st.getAll();q.onsuccess=()=>r(q.result);q.onerror=j;});}catch(e){console.warn("idbGetQueue:",e);return[];}
+}
+async function idbRemoveFromQueue(qid){
+  try{const d=await openIDB();const tx=d.transaction("pendingQueue","readwrite");tx.objectStore("pendingQueue").delete(qid);await new Promise((r,j)=>{tx.oncomplete=r;tx.onerror=j;});}catch(e){console.warn("idbRemoveFromQueue:",e);}
+}
+async function idbClearOrders(){
+  try{const d=await openIDB();const tx=d.transaction("orders","readwrite");tx.objectStore("orders").clear();await new Promise((r,j)=>{tx.oncomplete=r;tx.onerror=j;});}catch(e){console.warn("idbClearOrders:",e);}
+}
+
 // ─── HELPERS ───────────────────────────────────────────────────
 const NZ_TZ  = "Pacific/Auckland";
 const fmt    = dt => !dt?"—":new Date(dt).toLocaleString("en-NZ",{day:"2-digit",month:"short",year:"numeric",hour:"2-digit",minute:"2-digit",second:"2-digit",timeZone:NZ_TZ});
@@ -362,7 +402,15 @@ function ProductionScheduler({user,onLogout}){
       if(existing){
         setDupWarning({status:existing.status,order:existing});
       }
-      const r=await db.findPlanned(orderSearchQ.trim().toUpperCase());
+      // Use IDB cached planned orders when offline
+      let r=[];
+      if(!navigator.onLine){
+        const cached=await idbGetPlanned();
+        const q2=orderSearchQ.trim().toUpperCase();
+        r=cached.filter(p=>p.order_number?.toUpperCase()===q2&&p.status==="pending");
+      } else {
+        r=await db.findPlanned(orderSearchQ.trim().toUpperCase());
+      }
       if(r.length){
         const p=r[0];
         // Fix: correct NZ timezone for datetime picker (no double-offset)
@@ -400,15 +448,27 @@ function ProductionScheduler({user,onLogout}){
         status:"In Progress",created_by:user.username,
         breaks:[],break_minutes:0,is_paused:false,
       };
-      const res=await db.addOrder(o);
-      // mark planned order as started
-      try{ const pl=await db.findPlanned(orderNumber); if(pl.length) await db.updatePlanned(pl[0].id,{status:"started"}); }catch{}
-      setOrders(p=>[res[0],...p]);
-      setNf({selectedEmployees:[],orderNumber:"",itemId:"",lineId:"",productionQty:"",startDateTime:"",autoFilled:false});
-      setDupWarning(null);
-      setOrderSearchQ("");
-      showToast(`Order ${orderNumber} started with ${numEmp} employee${numEmp>1?"s":""}!`);
-      setView("dashboard");
+      if(!navigator.onLine){
+        // ── Offline: save locally with temp ID, queue for sync ──
+        const tempId=`temp-${Date.now()}-${Math.random().toString(36).slice(2,7)}`;
+        const localOrder={...o,id:tempId,_isOffline:true};
+        await idbSaveOrders([localOrder]);
+        await idbAddToQueue({type:"addOrder",order:o,tempId});
+        setOrders(p=>[localOrder,...p]);
+        setNf({selectedEmployees:[],orderNumber:"",itemId:"",lineId:"",productionQty:"",startDateTime:"",autoFilled:false});
+        setDupWarning(null);setOrderSearchQ("");
+        showToast(`Order ${orderNumber} saved offline — will sync when connected.`,"warn");
+        setView("dashboard");
+      } else {
+        const res=await db.addOrder(o);
+        try{ const pl=await db.findPlanned(orderNumber); if(pl.length) await db.updatePlanned(pl[0].id,{status:"started"}); }catch{}
+        setOrders(p=>[res[0],...p]);
+        idbSaveOrders([res[0]]);
+        setNf({selectedEmployees:[],orderNumber:"",itemId:"",lineId:"",productionQty:"",startDateTime:"",autoFilled:false});
+        setDupWarning(null);setOrderSearchQ("");
+        showToast(`Order ${orderNumber} started with ${numEmp} employee${numEmp>1?"s":""}!`);
+        setView("dashboard");
+      }
     }catch(e){showToast("Failed: "+e.message,"error");}
     setSaving(false);
   };
@@ -416,27 +476,36 @@ function ProductionScheduler({user,onLogout}){
   // ── Pause order ──
   const handlePause=async(o)=>{
     if(o.is_paused) return;
-    try{
-      const patch={is_paused:true,paused_at:nowISO(),status:"In Progress"};
-      await db.updateOrder(o.id,patch);
-      setOrders(p=>p.map(x=>x.id===o.id?{...x,...patch}:x));
-      showToast(`Order ${o.order_number} paused.`,"warn");
-    }catch(e){showToast("Failed: "+e.message,"error");}
+    const patch={is_paused:true,paused_at:nowISO(),status:"In Progress"};
+    // Always apply locally first
+    setOrders(p=>p.map(x=>x.id===o.id?{...x,...patch}:x));
+    idbSaveOrders([{...o,...patch}]);
+    if(!navigator.onLine||o._isOffline){
+      await idbAddToQueue({type:"updateOrder",id:o.id,patch});
+      showToast(`Order ${o.order_number} paused (offline — will sync).`,"warn");
+    } else {
+      try{ await db.updateOrder(o.id,patch); showToast(`Order ${o.order_number} paused.`,"warn"); }
+      catch(e){ await idbAddToQueue({type:"updateOrder",id:o.id,patch}); showToast(`Paused locally — sync pending.`,"warn"); }
+    }
   };
 
   // ── Resume order ──
   const handleResume=async(o)=>{
     if(!o.is_paused||!o.paused_at) return;
-    try{
-      const breakMins=minsTo(o.paused_at,nowISO());
-      const newBreak={start:o.paused_at,end:nowISO(),minutes:Math.round(breakMins*10)/10};
-      const breaks=[...(o.breaks||[]),newBreak];
-      const totalBreakMins=(o.break_minutes||0)+breakMins;
-      const patch={is_paused:false,paused_at:null,breaks,break_minutes:totalBreakMins};
-      await db.updateOrder(o.id,patch);
-      setOrders(p=>p.map(x=>x.id===o.id?{...x,...patch}:x));
-      showToast(`Order ${o.order_number} resumed.`);
-    }catch(e){showToast("Failed: "+e.message,"error");}
+    const breakMins=minsTo(o.paused_at,nowISO());
+    const newBreak={start:o.paused_at,end:nowISO(),minutes:Math.round(breakMins*10)/10};
+    const breaks=[...(o.breaks||[]),newBreak];
+    const totalBreakMins=(o.break_minutes||0)+breakMins;
+    const patch={is_paused:false,paused_at:null,breaks,break_minutes:totalBreakMins};
+    setOrders(p=>p.map(x=>x.id===o.id?{...x,...patch}:x));
+    idbSaveOrders([{...o,...patch}]);
+    if(!navigator.onLine||o._isOffline){
+      await idbAddToQueue({type:"updateOrder",id:o.id,patch});
+      showToast(`Order ${o.order_number} resumed (offline — will sync).`);
+    } else {
+      try{ await db.updateOrder(o.id,patch); showToast(`Order ${o.order_number} resumed.`); }
+      catch(e){ await idbAddToQueue({type:"updateOrder",id:o.id,patch}); showToast(`Resumed locally — sync pending.`,"warn"); }
+    }
   };
 
   // ── Close order ──
@@ -513,10 +582,22 @@ function ProductionScheduler({user,onLogout}){
         working_minutes:Math.round(workMins*10)/10,efficiency:eff,
         ...(finalSegments?{employee_segments:finalSegments}:{}),
       };
-      await db.updateOrder(cm.id,patch);
-      try{ const pl=await db.findPlanned(cm.order_number); if(pl.length) await db.updatePlanned(pl[0].id,{status:"completed"}); }catch{}
+      // Always update local state immediately
       setOrders(p=>p.map(o=>o.id===cm.id?{...o,...patch}:o));
-      showToast(`Order ${cm.order_number} closed!${eff!=null?" Efficiency: "+eff+"%":""}`);
+      idbSaveOrders([{...cm,...patch}]);
+      if(!navigator.onLine||cm._isOffline){
+        await idbAddToQueue({type:"updateOrder",id:cm.id,patch});
+        showToast(`Order ${cm.order_number} closed offline — will sync when connected.`,"warn");
+      } else {
+        try{
+          await db.updateOrder(cm.id,patch);
+          try{ const pl=await db.findPlanned(cm.order_number); if(pl.length) await db.updatePlanned(pl[0].id,{status:"completed"}); }catch{}
+          showToast(`Order ${cm.order_number} closed!${eff!=null?" Efficiency: "+eff+"%":""}`);
+        }catch(e){
+          await idbAddToQueue({type:"updateOrder",id:cm.id,patch});
+          showToast(`Closed locally — sync pending.`,"warn");
+        }
+      }
       setCm(null); if(sr?.id===cm.id)setSr(null); setView(isAdmin?"records":"dashboard");
     }catch(e){showToast("Failed: "+e.message,"error");}
     setSaving(false);
@@ -585,18 +666,66 @@ function ProductionScheduler({user,onLogout}){
   // Today's orders by local start date
   const todayOrders=orders.filter(o=>toLocalDate(o.start_datetime)===td);
 
-  // ── Polling-based refresh (30s) — Realtime WebSocket removed to reduce server memory ──
+  // ── Polling + offline cache + sync queue ─────────────────────
   useEffect(()=>{
+    // Hydrate from IndexedDB cache on first mount (shows data instantly if online was lost)
+    idbGetOrders().then(cached=>{
+      if(cached&&cached.length>0) setOrders(prev=>prev.length>0?prev:cached);
+    });
+    // Pre-load planned orders into IDB for offline order-search
+    if(navigator.onLine){
+      db.getPlanned().then(pl=>{ if(pl&&pl.length) idbSavePlanned(pl); }).catch(()=>{});
+    }
+
     const fetchActive=async()=>{
-      if(!navigator.onLine)return;
+      if(!navigator.onLine){
+        const cached=await idbGetOrders();
+        if(cached&&cached.length>0) setOrders(cached);
+        return;
+      }
       try{
         const fresh=await db.getActiveOrders();
         setOrders(prev=>[...prev.filter(o=>o.status!=="In Progress"),...fresh]);
+        idbSaveOrders(fresh);
+        db.getPlanned().then(pl=>{ if(pl&&pl.length) idbSavePlanned(pl); }).catch(()=>{});
       }catch(e){console.warn("Refresh failed:",e.message);}
     };
+
+    const flushQueue=async()=>{
+      const queue=await idbGetQueue();
+      if(!queue.length) return;
+      setRtStatus("syncing");
+      let synced=0;
+      for(const item of queue){
+        try{
+          if(item.type==="updateOrder"){
+            await db.updateOrder(item.id,item.patch);
+          } else if(item.type==="addOrder"){
+            const res=await db.addOrder(item.order);
+            const real=res[0];
+            if(real&&item.tempId){
+              setOrders(prev=>prev.map(o=>o.id===item.tempId?{...o,...real}:o));
+              idbClearOrders();
+            }
+          }
+          await idbRemoveFromQueue(item.qid);
+          synced++;
+        }catch(e){console.warn("Sync failed for item:",item.type,e.message);}
+      }
+      if(synced>0) showToast(`Synced ${synced} offline change${synced>1?"s":""}!`);
+    };
+
     const pollInterval=setInterval(()=>{if(!document.hidden)fetchActive();},30000);
-    const goOffline=()=>setRtStatus("offline");
-    const goOnline=()=>{setRtStatus("polling");fetchActive();};
+    const goOffline=()=>{
+      setRtStatus("offline-cached");
+      idbGetOrders().then(cached=>{ if(cached&&cached.length>0) setOrders(cached); });
+    };
+    const goOnline=async()=>{
+      setRtStatus("syncing");
+      await flushQueue();
+      setRtStatus("polling");
+      fetchActive();
+    };
     window.addEventListener("offline",goOffline);
     window.addEventListener("online",goOnline);
     return()=>{
@@ -604,6 +733,7 @@ function ProductionScheduler({user,onLogout}){
       window.removeEventListener("offline",goOffline);
       window.removeEventListener("online",goOnline);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   },[]);
 
 
@@ -1308,6 +1438,8 @@ function Dashboard({orders,todayOrders,todayDone,todayEffAvg,activeOrders,items,
           {isAdmin&&deviceLineId&&<span style={{background:"rgba(255,149,0,.1)",color:"#FF9500",border:"1px solid rgba(255,149,0,.2)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>Admin — All Lines</span>}
           {rtStatus==="polling"&&<span style={{background:"rgba(255,193,7,.1)",color:"#FFC107",border:"1px solid rgba(255,193,7,.25)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>🟡 Updating every 30s</span>}
           {rtStatus==="offline"&&<span style={{background:"rgba(255,82,82,.1)",color:"#FF5252",border:"1px solid rgba(255,82,82,.25)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>🔴 No connection</span>}
+          {rtStatus==="offline-cached"&&<span style={{background:"rgba(255,149,0,.1)",color:"#FF9500",border:"1px solid rgba(255,149,0,.25)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>🟠 Offline — cached data</span>}
+          {rtStatus==="syncing"&&<span style={{background:"rgba(123,140,255,.1)",color:"#7B8CFF",border:"1px solid rgba(123,140,255,.25)",fontSize:9,padding:"2px 8px",borderRadius:8,fontWeight:700,marginLeft:8,textTransform:"none",letterSpacing:0}}>🔄 Syncing…</span>}
         </h2>
         {deviceLineId&&!isAdmin&&<div style={{fontSize:9,color:"#5A5F78",marginBottom:6}}>Showing {deviceLineName||deviceLineId} only · Admin sees all lines</div>}
         <div style={{display:"flex",gap:8}}>
